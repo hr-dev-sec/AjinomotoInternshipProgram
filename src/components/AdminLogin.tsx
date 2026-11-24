@@ -1,9 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { signInWithPopup } from 'firebase/auth';
 import { ArrowLeft, Bot, Clock, Lock, ShieldCheck, Users, X } from 'lucide-react';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import { apiRequest, setAdminToken, setFirebaseIdToken } from '../lib/api';
-import { auth, googleAuthProvider } from '../lib/firebase';
 import { localizeApiMessage } from '../lib/localizeData';
 import { ThemeLanguageControls } from './ThemeLanguageControls';
 
@@ -27,7 +25,6 @@ export const AdminLogin: React.FC<{
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
   const [mediaMap, setMediaMap] = useState<Record<string, { currentUrl: string; objectPosition?: string }>>({});
 
@@ -65,34 +62,6 @@ export const AdminLogin: React.FC<{
       );
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleGoogleLogin = async () => {
-    setError('');
-    setGoogleLoading(true);
-    try {
-      const result = await signInWithPopup(auth, googleAuthProvider);
-      const idToken = await result.user.getIdToken();
-      setAdminToken(null);
-      setFirebaseIdToken(idToken);
-      const res = await apiRequest<{ token?: string; user: AdminUser }>('/api/auth/firebase', {
-        method: 'POST',
-        body: JSON.stringify({ idToken }),
-      });
-      if (res.token) {
-        setAdminToken(res.token);
-      }
-      onSuccess(res.user);
-    } catch (err) {
-      setFirebaseIdToken(null);
-      setError(
-        err instanceof Error
-          ? localizeApiMessage(err.message, lang)
-          : t('Login akun Google gagal.', 'Google sign-in failed.')
-      );
-    } finally {
-      setGoogleLoading(false);
     }
   };
 
@@ -339,7 +308,7 @@ export const AdminLogin: React.FC<{
 
               <button
                 type="submit"
-                disabled={loading || googleLoading}
+                disabled={loading}
                 className="w-full rounded-lg btn-theme-primary px-4 py-2.5 text-sm font-semibold disabled:opacity-50"
               >
                 {loading
@@ -347,53 +316,6 @@ export const AdminLogin: React.FC<{
                   : t('Masuk ke Dashboard', 'Sign In to Dashboard')}
               </button>
             </form>
-
-            <div className="relative flex items-center py-0.5">
-              <div className="flex-grow border-t border-slate-200 dark:border-slate-700" />
-              <span className="mx-3 shrink-0 text-[11px] font-medium text-slate-500 dark:text-slate-300">
-                {t('atau', 'or')}
-              </span>
-              <div className="flex-grow border-t border-slate-200 dark:border-slate-700" />
-            </div>
-
-            <button
-              type="button"
-              disabled={loading || googleLoading}
-              onClick={handleGoogleLogin}
-              className="flex w-full items-center justify-center gap-2.5 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 disabled:opacity-50 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  fill="#EA4335"
-                  d="M12 10.2v3.9h5.5c-.2 1.3-1.5 3.9-5.5 3.9-3.3 0-6-2.7-6-6s2.7-6 6-6c1.9 0 3.1.8 3.9 1.5l2.6-2.5C16.8 3.4 14.6 2.5 12 2.5 6.8 2.5 2.5 6.8 2.5 12s4.3 9.5 9.5 9.5c5.5 0 9.1-3.8 9.1-9.2 0-.6-.1-1.1-.2-1.6H12z"
-                />
-              </svg>
-              <span>
-                {googleLoading
-                  ? t('Menghubungkan Akun Google...', 'Connecting Google Account...')
-                  : t('Masuk dengan Google', 'Sign in with Google')}
-              </span>
-            </button>
-
-            <div className="surface-inset p-3.5 text-xs text-slate-600 dark:text-slate-200 space-y-1.5">
-              <div className="font-semibold text-slate-800 dark:text-white">
-                {t('Akses Uji Coba HR Development:', 'HR Development Demo Access:')}
-              </div>
-              <div className="font-mono">
-                Username: <span className="text-slate-900 dark:text-white font-semibold">hr.mojokerto</span> · Password:{' '}
-                <span className="text-slate-900 dark:text-white font-semibold">Ajinomoto2026!</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setUsername('hr.mojokerto');
-                  setPassword('Ajinomoto2026!');
-                }}
-                className="text-theme-accent font-semibold hover:underline"
-              >
-                {t('Isi Otomatis Kredensial Demo', 'Auto-Fill Demo Credentials')}
-              </button>
-            </div>
           </div>
         </div>
       </div>
