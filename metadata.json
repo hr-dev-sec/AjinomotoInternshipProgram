@@ -1,0 +1,6 @@
+{
+  "name": "Ajinomoto Internship Management System",
+  "description": "Sistem manajemen magang terintegrasi (MBKM & PKL) HR Development Section PT Ajinomoto Indonesia - PT Ajinex International, Mojokerto Factory dengan portal pendaftaran, absensi selfie GPS, evaluasi talent, manajemen PKS kampus, dan asisten analitik HR cerdas berbasis AI.",
+  "requestFramePermissions": ["camera", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
