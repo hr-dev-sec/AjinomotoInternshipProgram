@@ -3,13 +3,34 @@
 let inMemoryAdminToken: string | null = null;
 let inMemoryFirebaseToken: string | null = null;
 
-// Short-lived in-memory GET response cache + in-flight deduplication for snappy tab switching
-const GET_CACHE_TTL_MS = 15_000;
+// In-memory GET response cache + in-flight deduplication for zero-flash instant tab switching
+const GET_CACHE_TTL_MS = 90_000;
 const getResponseCache = new Map<string, { data: unknown; expiresAt: number }>();
 const inFlightGetRequests = new Map<string, Promise<unknown>>();
 
 export function clearApiGetCache(): void {
   getResponseCache.clear();
+}
+
+export function getCachedApiResponse<T>(url: string): T | null {
+  const cached = getResponseCache.get(url);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data as T;
+  }
+  return null;
+}
+
+export function primeApiGetCache(url: string, data: unknown): void {
+  getResponseCache.set(url, { data, expiresAt: Date.now() + GET_CACHE_TTL_MS });
+}
+
+export function prefetchApiGet(url: string): void {
+  if (getCachedApiResponse(url) !== null || inFlightGetRequests.has(url)) {
+    return;
+  }
+  void apiRequest(url).catch(() => {
+    // Silent best-effort background warmup
+  });
 }
 
 export function getFirebaseIdToken(): string | null {

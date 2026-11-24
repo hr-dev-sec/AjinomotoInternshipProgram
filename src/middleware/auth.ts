@@ -109,8 +109,39 @@ export function signSessionToken(payload: TokenPayload): string {
   return `${body}.${sig}`;
 }
 
+// Short-lived bounded in-memory cache for verified sessions to avoid 2 Supabase round-trips on every dashboard API call.
+// Immediately cleared on logout, profile edit, or user account edit/delete.
+const AUTH_SESSION_CACHE_TTL_MS = 30_000;
+const AUTH_SESSION_CACHE_MAX = 200;
+
+interface ResolvedAdminResult {
+  decodedUser: DecodedIdToken | { uid: string; email?: string };
+  adminUser: HydratedAdminUser;
+}
+
+const resolvedSessionCache = new Map<string, { value: ResolvedAdminResult; expiresAt: number }>();
+
+export function invalidateAuthSessionCache(token?: string): void {
+  if (token) {
+    resolvedSessionCache.delete(token);
+  } else {
+    resolvedSessionCache.clear();
+  }
+}
+
+function setCachedResolvedSession(token: string, value: ResolvedAdminResult, tokenExpMs?: number): void {
+  if (resolvedSessionCache.size >= AUTH_SESSION_CACHE_MAX) {
+    const oldestKey = resolvedSessionCache.keys().next().value;
+    if (oldestKey) resolvedSessionCache.delete(oldestKey);
+  }
+  const maxExpiry = Date.now() + AUTH_SESSION_CACHE_TTL_MS;
+  const expiresAt = typeof tokenExpMs === 'number' ? Math.min(maxExpiry, tokenExpMs) : maxExpiry;
+  resolvedSessionCache.set(token, { value, expiresAt });
+}
+
 export async function revokeSessionToken(token: string): Promise<void> {
   if (!token) return;
+  invalidateAuthSessionCache(token);
   const payload = verifyHmacSessionToken(token);
   if (payload?.jti) {
     await revokeSessionInDb(payload.jti, payload.uid || 'unknown', payload.exp);
@@ -155,32 +186,45 @@ export function getTokenFromRequest(req: Request): string | null {
   return null;
 }
 
-export async function resolveAuthenticatedAdmin(token: string): Promise<{
-  decodedUser: DecodedIdToken | { uid: string; email?: string };
-  adminUser: HydratedAdminUser;
-} | null> {
+export async function resolveAuthenticatedAdmin(token: string): Promise<ResolvedAdminResult | null> {
+  const cached = resolvedSessionCache.get(token);
+  if (cached) {
+    if (cached.expiresAt > Date.now()) {
+      return cached.value;
+    }
+    resolvedSessionCache.delete(token);
+  }
+
   // 1. Check signed corporate HMAC token first (2-part base64url)
   const hmacPayload = verifyHmacSessionToken(token);
   if (hmacPayload) {
-    if (hmacPayload.jti && (await isSessionRevokedInDb(hmacPayload.jti))) {
+    const uid = hmacPayload.uid || 'local-hr-mojokerto';
+    // Parallelize revocation check and user profile lookup to save a full Supabase round-trip
+    const [revoked, dbUser] = await Promise.all([
+      hmacPayload.jti ? isSessionRevokedInDb(hmacPayload.jti) : Promise.resolve(false),
+      getUserWithProfileByUid(uid).catch((error) => {
+        console.error('Failed loading HMAC session user from database:', error);
+        return null;
+      }),
+    ]);
+
+    if (revoked) {
       return null;
     }
-    const uid = hmacPayload.uid || 'local-hr-mojokerto';
-    try {
-      const dbUser = await getUserWithProfileByUid(uid);
-      if (dbUser) {
-        if (!dbUser.isActive) {
-          return null;
-        }
-        return {
-          decodedUser: { uid: dbUser.uid, email: dbUser.email },
-          adminUser: dbUser,
-        };
+
+    if (dbUser) {
+      if (!dbUser.isActive) {
+        return null;
       }
-    } catch (error) {
-      console.error('Failed loading HMAC session user from database:', error);
+      const resolved: ResolvedAdminResult = {
+        decodedUser: { uid: dbUser.uid, email: dbUser.email },
+        adminUser: dbUser,
+      };
+      setCachedResolvedSession(token, resolved, hmacPayload.exp);
+      return resolved;
     }
-    return {
+
+    const fallbackResolved: ResolvedAdminResult = {
       decodedUser: { uid },
       adminUser: {
         id: 0,
@@ -196,6 +240,8 @@ export async function resolveAuthenticatedAdmin(token: string): Promise<{
         isActive: true,
       },
     };
+    setCachedResolvedSession(token, fallbackResolved, hmacPayload.exp);
+    return fallbackResolved;
   }
 
   // 2. Otherwise verify Firebase ID Token (3-part JWT) via Firebase Admin SDK
@@ -212,7 +258,9 @@ export async function resolveAuthenticatedAdmin(token: string): Promise<{
     if (!adminUser.isActive) {
       return null;
     }
-    return { decodedUser: decodedToken, adminUser };
+    const resolved: ResolvedAdminResult = { decodedUser: decodedToken, adminUser };
+    setCachedResolvedSession(token, resolved);
+    return resolved;
   } catch {
     return null;
   }

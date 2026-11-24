@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { signInWithPopup } from 'firebase/auth';
-import { ArrowLeft, Bot, Lock, ShieldCheck, Users } from 'lucide-react';
+import { ArrowLeft, Bot, Clock, Lock, ShieldCheck, Users, X } from 'lucide-react';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
 import { apiRequest, setAdminToken, setFirebaseIdToken } from '../lib/api';
 import { auth, googleAuthProvider } from '../lib/firebase';
@@ -18,9 +18,11 @@ export interface AdminUser {
 }
 
 export const AdminLogin: React.FC<{
+  notice?: string;
+  onDismissNotice?: () => void;
   onSuccess: (user: AdminUser) => void;
   onBackToPortal: () => void;
-}> = ({ onSuccess, onBackToPortal }) => {
+}> = ({ notice, onDismissNotice, onSuccess, onBackToPortal }) => {
   const { theme, lang, t } = useAppPreferences();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -278,6 +280,23 @@ export const AdminLogin: React.FC<{
                 )}
               </p>
             </div>
+
+            {notice && (
+              <div className="flex items-start gap-2.5 rounded-xl border border-amber-300/90 bg-amber-50 px-3.5 py-3 text-xs text-amber-900 dark:border-amber-700/60 dark:bg-amber-950/50 dark:text-amber-200">
+                <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <span className="flex-1 leading-relaxed">{notice}</span>
+                {onDismissNotice && (
+                  <button
+                    type="button"
+                    onClick={onDismissNotice}
+                    aria-label={t('Tutup notifikasi', 'Dismiss notice')}
+                    className="rounded-md p-0.5 text-amber-700 hover:bg-amber-200/70 dark:text-amber-300 dark:hover:bg-amber-900/60 transition-colors"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-3.5">
               <div>

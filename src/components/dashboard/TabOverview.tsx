@@ -21,7 +21,7 @@ import {
   Users,
 } from 'lucide-react';
 import { useAppPreferences } from '../../contexts/AppPreferencesContext';
-import { apiRequest } from '../../lib/api';
+import { apiRequest, getCachedApiResponse, primeApiGetCache } from '../../lib/api';
 import { exportExecutivePdf } from '../../lib/exports';
 import { localizeApiMessage, localizeTalent } from '../../lib/localizeData';
 import { useRealtimeSync } from '../../lib/realtime';
@@ -43,15 +43,25 @@ interface InsightState {
   langkahPrioritas: string[];
 }
 
+interface DashboardOverviewResponse {
+  stats: DashboardStatsResponse;
+  mahasiswa: Mahasiswa[];
+}
+
 export const TabOverview: React.FC<{
   onOpenAssistant: () => void;
   onNavigateTab?: (tab: DashboardTab) => void;
 }> = ({ onOpenAssistant, onNavigateTab }) => {
   const { lang, t } = useAppPreferences();
-  const [stats, setStats] = useState<DashboardStatsResponse | null>(null);
-  const [interns, setInterns] = useState<Mahasiswa[]>([]);
-  const [allInterns, setAllInterns] = useState<Mahasiswa[]>([]);
-  const [loading, setLoading] = useState(true);
+  const cachedOverview = getCachedApiResponse<DashboardOverviewResponse>('/api/dashboard/overview');
+  const initialStats = cachedOverview?.stats ?? getCachedApiResponse<DashboardStatsResponse>('/api/dashboard/stats');
+  const initialAllInterns = cachedOverview?.mahasiswa ?? getCachedApiResponse<Mahasiswa[]>('/api/mahasiswa') ?? [];
+  const initialActiveInterns = initialAllInterns.filter((item) => item.status === 'Aktif');
+
+  const [stats, setStats] = useState<DashboardStatsResponse | null>(initialStats);
+  const [interns, setInterns] = useState<Mahasiswa[]>(initialActiveInterns);
+  const [allInterns, setAllInterns] = useState<Mahasiswa[]>(initialAllInterns);
+  const [loading, setLoading] = useState(!initialStats);
   const [loadError, setLoadError] = useState('');
   const [uniFilter, setUniFilter] = useState<'ALL' | 'MBKM' | 'PKL'>('ALL');
 
@@ -60,7 +70,7 @@ export const TabOverview: React.FC<{
   const [insightError, setInsightError] = useState('');
 
   // Quick Assessment state
-  const [selectedNim, setSelectedNim] = useState('');
+  const [selectedNim, setSelectedNim] = useState(initialActiveInterns[0]?.nim || '');
   const [skorBk, setSkorBk] = useState(8);
   const [skorPs, setSkorPs] = useState(8);
   const [skorTw, setSkorTw] = useState(8);
@@ -73,12 +83,14 @@ export const TabOverview: React.FC<{
     if (!silent) setLoading(true);
     setLoadError('');
     try {
-      const [s, m] = await Promise.all([
-        apiRequest<DashboardStatsResponse>('/api/dashboard/stats'),
-        apiRequest<Mahasiswa[]>('/api/mahasiswa'),
-      ]);
+      const overview = await apiRequest<DashboardOverviewResponse>('/api/dashboard/overview');
+      const s = overview.stats;
+      const list = Array.isArray(overview.mahasiswa) ? overview.mahasiswa : [];
+      primeApiGetCache('/api/dashboard/stats', s);
+      primeApiGetCache('/api/mahasiswa', list);
+      window.dispatchEvent(new CustomEvent('ajinomoto:dashboard-stats-primed', { detail: s }));
+
       setStats(s);
-      const list = Array.isArray(m) ? m : [];
       setAllInterns(list);
       const activeList = list.filter((item) => item.status === 'Aktif');
       setInterns(activeList);
@@ -106,7 +118,12 @@ export const TabOverview: React.FC<{
   );
 
   useEffect(() => {
-    loadData();
+    if (initialStats) {
+      window.dispatchEvent(new CustomEvent('ajinomoto:dashboard-stats-primed', { detail: initialStats }));
+      void loadData(true);
+    } else {
+      void loadData(false);
+    }
   }, []);
 
   const handleGenerateInsight = async () => {
@@ -168,10 +185,39 @@ export const TabOverview: React.FC<{
 
   if (loading) {
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className="h-32 rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900 animate-pulse" />
-        ))}
+      <div className="space-y-6 animate-pulse">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div
+              key={i}
+              className="kpi-tile p-5 h-36 flex flex-col justify-between"
+            >
+              <div className="flex items-start justify-between">
+                <div className="space-y-2.5 flex-1">
+                  <div className="h-3 w-28 rounded bg-slate-200 dark:bg-slate-800" />
+                  <div className="h-8 w-16 rounded bg-slate-200 dark:bg-slate-800" />
+                </div>
+                <div className="h-10 w-10 rounded-xl bg-slate-200 dark:bg-slate-800" />
+              </div>
+              <div className="h-3 w-full rounded bg-slate-100 dark:bg-slate-800/80" />
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="surface-card h-16 px-4 py-3 flex items-center gap-3">
+              <div className="h-8 w-8 rounded-lg bg-slate-200 dark:bg-slate-800 shrink-0" />
+              <div className="space-y-1.5 flex-1">
+                <div className="h-2.5 w-24 rounded bg-slate-200 dark:bg-slate-800" />
+                <div className="h-3 w-32 rounded bg-slate-100 dark:bg-slate-800/80" />
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          <div className="surface-card lg:col-span-7 h-72 p-6" />
+          <div className="surface-card lg:col-span-5 h-72 p-6" />
+        </div>
       </div>
     );
   }

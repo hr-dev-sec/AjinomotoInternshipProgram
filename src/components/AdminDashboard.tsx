@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
-import { apiRequest, setAdminToken, setFirebaseIdToken } from '../lib/api';
+import { apiRequest, getCachedApiResponse, prefetchApiGet, setAdminToken, setFirebaseIdToken } from '../lib/api';
 import { auth } from '../lib/firebase';
 import { localizeAccountRole } from '../lib/localizeData';
 import { useRealtimeSync } from '../lib/realtime';
@@ -29,6 +29,7 @@ import type { AdminUser } from './AdminLogin';
 import { ThemeLanguageControls } from './ThemeLanguageControls';
 import { EditProfileModal } from './dashboard/EditProfileModal';
 import { HrAssistantDrawer } from './dashboard/HrAssistantDrawer';
+import { SessionTimeoutModal } from './dashboard/SessionTimeoutModal';
 import { TabApplicants } from './dashboard/TabApplicants';
 import { TabAttendance } from './dashboard/TabAttendance';
 import { TabInterns } from './dashboard/TabInterns';
@@ -53,7 +54,7 @@ export type DashboardTab =
 export const AdminDashboard: React.FC<{
   user: AdminUser;
   onUserUpdated: (user: AdminUser) => void;
-  onLoggedOut: () => void;
+  onLoggedOut: (reason?: 'manual' | 'timeout') => void;
   onGoPortal: () => void;
 }> = ({ user, onUserUpdated, onLoggedOut, onGoPortal }) => {
   const { lang, t } = useAppPreferences();
@@ -165,21 +166,54 @@ export const AdminDashboard: React.FC<{
     [t, canManageMedia, canManageUsers]
   );
 
+  const applyNavBadgesFromStats = (res?: DashboardStatsResponse | null) => {
+    if (res?.actionQueue) {
+      setNavBadges({
+        applicants: res.actionQueue.pendingApplicants,
+        pks: res.actionQueue.expiringOrExpiredPks,
+      });
+    }
+  };
+
   const refreshNavBadges = () => {
+    const cachedStats = getCachedApiResponse<DashboardStatsResponse>('/api/dashboard/stats');
+    if (cachedStats) {
+      applyNavBadgesFromStats(cachedStats);
+      return;
+    }
     apiRequest<DashboardStatsResponse>('/api/dashboard/stats')
-      .then((res) => {
-        if (res?.actionQueue) {
-          setNavBadges({
-            applicants: res.actionQueue.pendingApplicants,
-            pks: res.actionQueue.expiringOrExpiredPks,
-          });
-        }
-      })
+      .then((res) => applyNavBadgesFromStats(res))
       .catch(() => {});
   };
 
   useEffect(() => {
-    refreshNavBadges();
+    const cachedStats = getCachedApiResponse<DashboardStatsResponse>('/api/dashboard/stats');
+    if (cachedStats) {
+      applyNavBadgesFromStats(cachedStats);
+    }
+
+    const onStatsPrimed = (e: Event) => {
+      const detail = (e as CustomEvent<DashboardStatsResponse>).detail;
+      if (detail) applyNavBadgesFromStats(detail);
+    };
+    window.addEventListener('ajinomoto:dashboard-stats-primed', onStatsPrimed);
+
+    // Gently warm up core sidebar tabs in the background after initial overview settles so tab switches are instant (0ms)
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
+    const wave1 = window.setTimeout(() => {
+      prefetchApiGet(`/api/absensi/harian?tanggal=${encodeURIComponent(today)}`);
+      prefetchApiGet('/api/pendaftar');
+    }, 350);
+    const wave2 = window.setTimeout(() => {
+      prefetchApiGet('/api/lowongan/admin');
+      prefetchApiGet('/api/pks');
+    }, 800);
+
+    return () => {
+      window.removeEventListener('ajinomoto:dashboard-stats-primed', onStatsPrimed);
+      window.clearTimeout(wave1);
+      window.clearTimeout(wave2);
+    };
   }, []);
 
   useRealtimeSync(['pendaftaran', 'universitas_pks', 'all'], () => {
@@ -200,7 +234,7 @@ export const AdminDashboard: React.FC<{
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  const handleLogout = async () => {
+  const handleLogout = async (reason: 'manual' | 'timeout' = 'manual') => {
     try {
       await apiRequest('/api/auth/logout', { method: 'POST' });
     } catch {
@@ -213,7 +247,7 @@ export const AdminDashboard: React.FC<{
     }
     setAdminToken(null);
     setFirebaseIdToken(null);
-    onLoggedOut();
+    onLoggedOut(reason);
   };
 
   const activeMeta = tabs.find((tab) => tab.id === activeTab) || tabs[0];
@@ -395,7 +429,7 @@ export const AdminDashboard: React.FC<{
               </button>
               <button
                 type="button"
-                onClick={handleLogout}
+                onClick={() => void handleLogout('manual')}
                 className="flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800 whitespace-nowrap"
               >
                 <LogOut className="h-3.5 w-3.5 shrink-0" />
@@ -465,7 +499,7 @@ export const AdminDashboard: React.FC<{
               </button>
               <button
                 type="button"
-                onClick={handleLogout}
+                onClick={() => void handleLogout('manual')}
                 className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 py-2 text-xs font-semibold dark:border-slate-700"
               >
                 <LogOut className="h-3.5 w-3.5" />
@@ -547,20 +581,22 @@ export const AdminDashboard: React.FC<{
 
         {/* Tab Body */}
         <main className="flex-1 min-w-0 p-3 sm:p-6 max-w-[1520px] 2xl:max-w-[1720px] w-full mx-auto">
-          {activeTab === 'overview' && (
-            <TabOverview
-              onOpenAssistant={() => setAssistantOpen(true)}
-              onNavigateTab={(tab) => setActiveTab(tab)}
-            />
-          )}
-          {activeTab === 'attendance' && <TabAttendance />}
-          {activeTab === 'interns' && <TabInterns />}
-          {activeTab === 'vacancies' && <TabVacancies />}
-          {activeTab === 'pks' && <TabPks />}
-          {activeTab === 'applicants' && <TabApplicants />}
-          {activeTab === 'media' && canManageMedia && <TabMedia />}
-          {activeTab === 'users' && canManageUsers && <TabUsers currentUser={user} />}
-          {activeTab === 'settings' && <TabSettings onLogout={handleLogout} />}
+          <div key={activeTab} className="tab-panel-enter">
+            {activeTab === 'overview' && (
+              <TabOverview
+                onOpenAssistant={() => setAssistantOpen(true)}
+                onNavigateTab={(tab) => setActiveTab(tab)}
+              />
+            )}
+            {activeTab === 'attendance' && <TabAttendance />}
+            {activeTab === 'interns' && <TabInterns />}
+            {activeTab === 'vacancies' && <TabVacancies />}
+            {activeTab === 'pks' && <TabPks />}
+            {activeTab === 'applicants' && <TabApplicants />}
+            {activeTab === 'media' && canManageMedia && <TabMedia />}
+            {activeTab === 'users' && canManageUsers && <TabUsers currentUser={user} />}
+            {activeTab === 'settings' && <TabSettings onLogout={() => void handleLogout('manual')} />}
+          </div>
         </main>
       </div>
 
@@ -571,6 +607,11 @@ export const AdminDashboard: React.FC<{
         user={user}
         onClose={() => setProfileModalOpen(false)}
         onSaved={onUserUpdated}
+      />
+
+      <SessionTimeoutModal
+        onTimeoutLogout={() => handleLogout('timeout')}
+        onManualLogout={() => handleLogout('manual')}
       />
 
       {/* Command Palette (Ctrl/Cmd + K) */}

@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAppPreferences } from '../../contexts/AppPreferencesContext';
-import { apiRequest } from '../../lib/api';
+import { apiRequest, getCachedApiResponse } from '../../lib/api';
 import { exportAttendancePdf, exportToExcel } from '../../lib/exports';
 import { localizeApiMessage, localizeAttendanceNote, localizeStatus } from '../../lib/localizeData';
 import { useRealtimeSync } from '../../lib/realtime';
@@ -35,8 +35,11 @@ export const TabAttendance: React.FC = () => {
   const [tanggal, setTanggal] = useState(() =>
     new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date())
   );
-  const [summary, setSummary] = useState<DailyAttendanceSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const initialSummary = getCachedApiResponse<DailyAttendanceSummary>(
+    `/api/absensi/harian?tanggal=${encodeURIComponent(tanggal)}`
+  );
+  const [summary, setSummary] = useState<DailyAttendanceSummary | null>(initialSummary);
+  const [loading, setLoading] = useState(!initialSummary);
   const [loadError, setLoadError] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [photoModal, setPhotoModal] = useState<{ nama: string; src: string; info: string } | null>(null);
@@ -72,7 +75,16 @@ export const TabAttendance: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchDaily(tanggal);
+    const cached = getCachedApiResponse<DailyAttendanceSummary>(
+      `/api/absensi/harian?tanggal=${encodeURIComponent(tanggal)}`
+    );
+    if (cached) {
+      setSummary(cached);
+      setLoading(false);
+      void fetchDaily(tanggal, true);
+    } else {
+      void fetchDaily(tanggal, false);
+    }
   }, [tanggal]);
 
   useRealtimeSync(['absensi', 'mahasiswa', 'settings', 'all'], () => {

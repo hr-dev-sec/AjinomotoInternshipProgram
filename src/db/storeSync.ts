@@ -1,6 +1,5 @@
 import { desc, eq } from 'drizzle-orm';
 import { db, formatPostgresConnectionError } from './index.js';
-import { ensureMediaAssetsSeeded } from './media.js';
 import {
   absensi,
   aiAuditLogs,
@@ -332,10 +331,11 @@ export async function syncDatabaseToPostgres(
 
 export async function loadOrSeedPostgresData(fallbackSeed: DatabaseSchema): Promise<DatabaseSchema> {
   try {
-    if (!bootstrapSeedChecked) {
-      await Promise.all([ensureMediaAssetsSeeded(), ensureAdminUserSeeded(fallbackSeed)]);
-      bootstrapSeedChecked = true;
-    }
+    const seedPromise = !bootstrapSeedChecked
+      ? ensureAdminUserSeeded(fallbackSeed).then(() => {
+          bootstrapSeedChecked = true;
+        })
+      : Promise.resolve();
 
     const [
       existingSettings,
@@ -357,6 +357,7 @@ export async function loadOrSeedPostgresData(fallbackSeed: DatabaseSchema): Prom
       db.select().from(universitasPks).orderBy(desc(universitasPks.createdAt)),
       db.select().from(aiAuditLogs).orderBy(desc(aiAuditLogs.createdAt)),
       db.select().from(emailLogs).orderBy(desc(emailLogs.createdAt)),
+      seedPromise,
     ]);
 
     const hasExistingPostgresData =

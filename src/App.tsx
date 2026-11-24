@@ -3,12 +3,13 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { AdminLogin, type AdminUser } from './components/AdminLogin';
 import { PublicPortal, type PublicRoute } from './components/PublicPortal';
 import { useAppPreferences } from './contexts/AppPreferencesContext';
-import { apiRequest, setFirebaseIdToken } from './lib/api';
+import { apiRequest, prefetchApiGet, setFirebaseIdToken } from './lib/api';
 import { auth } from './lib/firebase';
 
 type AppRoute = PublicRoute | 'login' | 'dashboard';
 
 const VALID_ROUTES: AppRoute[] = ['landing', 'index', 'formmbkm', 'formpkl', 'absensi', 'login', 'dashboard'];
+const DEFAULT_FAVICON_URL = '/assets/aistudio/Logo_Ajinomoto_641a64fc.png';
 
 function parseHashRoute(): AppRoute {
   const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
@@ -18,11 +19,31 @@ function parseHashRoute(): AppRoute {
   return 'landing';
 }
 
+function applyFavicon(href: string) {
+  const targetHref = href || DEFAULT_FAVICON_URL;
+  const selectors = ['link[rel="icon"]', 'link[rel="shortcut icon"]', 'link[rel="apple-touch-icon"]'];
+  selectors.forEach((selector) => {
+    const existing = document.querySelector<HTMLLinkElement>(selector);
+    if (existing) {
+      if (existing.getAttribute('href') !== targetHref) {
+        existing.setAttribute('href', targetHref);
+      }
+    } else if (selector === 'link[rel="icon"]') {
+      const link = document.createElement('link');
+      link.rel = 'icon';
+      link.type = 'image/png';
+      link.href = targetHref;
+      document.head.appendChild(link);
+    }
+  });
+}
+
 export default function App() {
   const { t } = useAppPreferences();
   const [route, setRoute] = useState<AppRoute>(() => parseHashRoute());
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [loginNoticeType, setLoginNoticeType] = useState<'timeout' | 'expired' | null>(null);
 
   const navigate = (next: AppRoute) => {
     window.location.hash = `#${next}`;
@@ -30,12 +51,37 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  // Sync browser tab favicon if brand_logo_ajinomoto is updated in Media Manager (non-blocking)
+  useEffect(() => {
+    const syncFavicon = () => {
+      apiRequest<{ media?: Record<string, { currentUrl?: string }> }>('/api/public/media')
+        .then((res) => {
+          const customLogo = res?.media?.brand_logo_ajinomoto?.currentUrl;
+          if (customLogo) applyFavicon(customLogo);
+        })
+        .catch(() => {});
+    };
+    const timer = window.setTimeout(syncFavicon, 400);
+    const onMutated = (e: Event) => {
+      const detail = (e as CustomEvent<{ url?: string }>).detail;
+      if (detail?.url?.includes('/api/media')) {
+        syncFavicon();
+      }
+    };
+    window.addEventListener('ajinomoto:mutated', onMutated);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('ajinomoto:mutated', onMutated);
+    };
+  }, []);
+
   useEffect(() => {
     const handleHashChange = () => {
       setRoute(parseHashRoute());
     };
     const handleUnauthorized = () => {
       setAdminUser(null);
+      setLoginNoticeType((prev) => prev || 'expired');
       setRoute((prev) => {
         if (prev === 'dashboard') {
           window.location.hash = '#login';
@@ -56,16 +102,30 @@ export default function App() {
     let active = true;
     (async () => {
       try {
-        await auth.authStateReady();
-        const fbUser = auth.currentUser;
-        if (fbUser) {
-          const fbToken = await fbUser.getIdToken();
-          setFirebaseIdToken(fbToken);
+        // Fast path: check HttpOnly session cookie immediately without waiting for Firebase SDK boot
+        let res = await apiRequest<{ authenticated: boolean; user?: AdminUser }>('/api/auth/session');
+
+        // Fallback path: only check Firebase Google Auth if cookie session is not active
+        if (!res.authenticated && active) {
+          try {
+            await auth.authStateReady();
+            const fbUser = auth.currentUser;
+            if (fbUser) {
+              const fbToken = await fbUser.getIdToken();
+              setFirebaseIdToken(fbToken);
+              res = await apiRequest<{ authenticated: boolean; user?: AdminUser }>('/api/auth/session');
+            }
+          } catch {
+            // ignore Firebase fallback errors when unauthenticated
+          }
         }
-        // Always check /api/auth/session with HttpOnly cookie (zero localStorage)
-        const res = await apiRequest<{ authenticated: boolean; user?: AdminUser }>('/api/auth/session');
+
         if (active) {
-          setAdminUser(res.authenticated && res.user ? res.user : null);
+          const authenticatedUser = res.authenticated && res.user ? res.user : null;
+          setAdminUser(authenticatedUser);
+          if (authenticatedUser) {
+            prefetchApiGet('/api/dashboard/overview');
+          }
           window.dispatchEvent(new CustomEvent('ajinomoto:auth-changed'));
         }
       } catch {
@@ -87,16 +147,32 @@ export default function App() {
   }, [checkingAuth, route, adminUser]);
 
   const handleAuthSuccess = (u: AdminUser) => {
+    setLoginNoticeType(null);
     setAdminUser(u);
+    prefetchApiGet('/api/dashboard/overview');
     window.dispatchEvent(new CustomEvent('ajinomoto:auth-changed'));
     navigate('dashboard');
   };
 
-  const handleLoggedOut = () => {
+  const handleLoggedOut = (reason: 'manual' | 'timeout' = 'manual') => {
     setAdminUser(null);
+    setLoginNoticeType(reason === 'timeout' ? 'timeout' : null);
     window.dispatchEvent(new CustomEvent('ajinomoto:auth-changed'));
     navigate('login');
   };
+
+  const loginNoticeText =
+    loginNoticeType === 'timeout'
+      ? t(
+          'Sesi Anda berakhir otomatis karena tidak ada aktivitas selama 15 menit tanpa konfirmasi. Silakan login kembali untuk melanjutkan.',
+          'Your session ended automatically due to 15 minutes of inactivity without confirmation. Please sign in again to continue.'
+        )
+      : loginNoticeType === 'expired'
+        ? t(
+            'Sesi login Anda telah berakhir. Silakan masuk kembali untuk melanjutkan.',
+            'Your login session has expired. Please sign in again to continue.'
+          )
+        : '';
 
   if (route === 'dashboard') {
     if (checkingAuth) {
@@ -109,6 +185,8 @@ export default function App() {
     if (!adminUser) {
       return (
         <AdminLogin
+          notice={loginNoticeText}
+          onDismissNotice={() => setLoginNoticeType(null)}
           onSuccess={handleAuthSuccess}
           onBackToPortal={() => navigate('index')}
         />
@@ -137,6 +215,8 @@ export default function App() {
     }
     return (
       <AdminLogin
+        notice={loginNoticeText}
+        onDismissNotice={() => setLoginNoticeType(null)}
         onSuccess={handleAuthSuccess}
         onBackToPortal={() => navigate('index')}
       />

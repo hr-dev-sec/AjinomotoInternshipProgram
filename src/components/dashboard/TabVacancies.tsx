@@ -18,7 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAppPreferences } from '../../contexts/AppPreferencesContext';
-import { apiRequest } from '../../lib/api';
+import { apiRequest, getCachedApiResponse } from '../../lib/api';
 import { exportVacanciesExcel } from '../../lib/exports';
 import { localizeApiMessage, localizeVacancy } from '../../lib/localizeData';
 import { useRealtimeSync } from '../../lib/realtime';
@@ -35,8 +35,9 @@ function getRoleIcon(title: string) {
 
 export const TabVacancies: React.FC = () => {
   const { lang, t } = useAppPreferences();
-  const [rows, setRows] = useState<Lowongan[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialRows = getCachedApiResponse<Lowongan[]>('/api/lowongan/admin');
+  const [rows, setRows] = useState<Lowongan[]>(Array.isArray(initialRows) ? initialRows : []);
+  const [loading, setLoading] = useState(!Array.isArray(initialRows));
   const [errorMsg, setErrorMsg] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | LowonganStatus>('ALL');
@@ -74,7 +75,7 @@ export const TabVacancies: React.FC = () => {
   };
 
   useEffect(() => {
-    loadRows();
+    void loadRows(Array.isArray(initialRows));
   }, []);
 
   useRealtimeSync(['lowongan', 'all'], () => {

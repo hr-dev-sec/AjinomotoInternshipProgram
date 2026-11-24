@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Award, CheckCircle2, ClipboardList, Edit2, Eye, FileClock, FileSpreadsheet, LogIn, Plus, Search, X } from 'lucide-react';
 import { useAppPreferences } from '../../contexts/AppPreferencesContext';
-import { apiRequest } from '../../lib/api';
+import { apiRequest, getCachedApiResponse } from '../../lib/api';
 import { exportInternCertificatePdf, exportToExcel } from '../../lib/exports';
 import {
   localizeApiMessage,
@@ -24,8 +24,9 @@ const PAGE_SIZE = 6;
 
 export const TabInterns: React.FC = () => {
   const { lang, t } = useAppPreferences();
-  const [rows, setRows] = useState<Mahasiswa[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialRows = getCachedApiResponse<Mahasiswa[]>('/api/mahasiswa');
+  const [rows, setRows] = useState<Mahasiswa[]>(Array.isArray(initialRows) ? initialRows : []);
+  const [loading, setLoading] = useState(!Array.isArray(initialRows));
   const [loadError, setLoadError] = useState('');
 
   const [search, setSearch] = useState('');
@@ -84,7 +85,7 @@ export const TabInterns: React.FC = () => {
   };
 
   useEffect(() => {
-    loadRows();
+    void loadRows(Array.isArray(initialRows));
   }, []);
 
   useRealtimeSync(['mahasiswa', 'evaluasi', 'pendaftaran', 'all'], () => {

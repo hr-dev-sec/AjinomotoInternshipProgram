@@ -61,6 +61,7 @@ import {
   canManageUsersRole,
   getTokenFromRequest,
   hashPasswordScrypt,
+  invalidateAuthSessionCache,
   isAdminRole,
   requireAuth,
   requireUserManagementRole,
@@ -697,6 +698,7 @@ export function createApiApp(): Express {
         });
       }
 
+      invalidateAuthSessionCache();
       broadcastRealtimeEvent('users', 'profile_updated', { username: updated.username });
       return res.json({
         message: 'Profil pengguna berhasil diperbarui.',
@@ -852,6 +854,7 @@ export function createApiApp(): Express {
         req.adminUser?.username || 'hr.mojokerto'
       );
 
+      invalidateAuthSessionCache();
       broadcastRealtimeEvent('users', 'updated', { id: updated.id, username: updated.username });
       return res.json({
         message: `Akun @${updated.username} berhasil diperbarui.`,
@@ -896,6 +899,7 @@ export function createApiApp(): Express {
       }
 
       await deleteManagedUser(targetId);
+      invalidateAuthSessionCache();
       broadcastRealtimeEvent('users', 'deleted', { id: targetId });
       return res.json({ ok: true, message: `Akun @${existing.username} telah dihapus.` });
     } catch (err) {
@@ -910,6 +914,15 @@ export function createApiApp(): Express {
   app.get('/api/dashboard/stats', requireAuth, (_req, res) => {
     dbStore.autoUpdatePksStatuses();
     res.json(dbStore.getDashboardStats());
+  });
+
+  // Combined overview bootstrap endpoint: returns stats + mahasiswa in a single round-trip
+  app.get('/api/dashboard/overview', requireAuth, (_req, res) => {
+    dbStore.autoUpdatePksStatuses();
+    res.json({
+      stats: dbStore.getDashboardStats(),
+      mahasiswa: dbStore.getAll().mahasiswa,
+    });
   });
 
   app.get('/api/absensi/harian', requireAuth, (req, res) => {

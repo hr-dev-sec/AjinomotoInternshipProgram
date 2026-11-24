@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Check, Eye, FileDown, Mail, Search, Sparkles, X } from 'lucide-react';
 import { useAppPreferences } from '../../contexts/AppPreferencesContext';
-import { apiRequest } from '../../lib/api';
+import { apiRequest, getCachedApiResponse } from '../../lib/api';
 import { exportApplicantsCsv } from '../../lib/exports';
 import {
   localizeApiMessage,
@@ -24,8 +24,9 @@ interface CvScreenResult {
 
 export const TabApplicants: React.FC = () => {
   const { lang, t } = useAppPreferences();
-  const [rows, setRows] = useState<Pendaftaran[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialRows = getCachedApiResponse<Pendaftaran[]>('/api/pendaftar');
+  const [rows, setRows] = useState<Pendaftaran[]>(Array.isArray(initialRows) ? initialRows : []);
+  const [loading, setLoading] = useState(!Array.isArray(initialRows));
   const [programFilter, setProgramFilter] = useState<'ALL' | ProgramType>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | PendaftaranStatus>('ALL');
   const [search, setSearch] = useState('');
@@ -70,7 +71,7 @@ export const TabApplicants: React.FC = () => {
   };
 
   useEffect(() => {
-    loadRows();
+    void loadRows(Array.isArray(initialRows));
   }, []);
 
   useRealtimeSync(['pendaftaran', 'all'], () => {

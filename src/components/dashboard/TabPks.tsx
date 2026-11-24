@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAppPreferences } from '../../contexts/AppPreferencesContext';
-import { apiRequest } from '../../lib/api';
+import { apiRequest, getCachedApiResponse } from '../../lib/api';
 import { exportPksCsv } from '../../lib/exports';
 import { localizeApiMessage, localizePksNote } from '../../lib/localizeData';
 import { useRealtimeSync } from '../../lib/realtime';
@@ -32,8 +32,9 @@ function daysRemaining(endDate: string): number {
 
 export const TabPks: React.FC = () => {
   const { lang, t } = useAppPreferences();
-  const [rows, setRows] = useState<UniversitasPKS[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialRows = getCachedApiResponse<UniversitasPKS[]>('/api/pks');
+  const [rows, setRows] = useState<UniversitasPKS[]>(Array.isArray(initialRows) ? initialRows : []);
+  const [loading, setLoading] = useState(!Array.isArray(initialRows));
   const [errorMsg, setErrorMsg] = useState('');
   const [search, setSearch] = useState('');
   const [reminderNotice, setReminderNotice] = useState('');
@@ -68,7 +69,7 @@ export const TabPks: React.FC = () => {
   };
 
   useEffect(() => {
-    loadRows();
+    void loadRows(Array.isArray(initialRows));
   }, []);
 
   useRealtimeSync(['universitas_pks', 'all'], () => {
