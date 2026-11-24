@@ -3,7 +3,7 @@ import type { NextFunction, Request, Response } from 'express';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import { isSessionRevokedInDb, revokeSessionInDb } from '../db/preferences.js';
 import { getOrCreateUser, getUserWithProfileByUid, type HydratedAdminUser } from '../db/users.js';
-import { adminAuth } from '../lib/firebase-admin.js';
+import { getAdminAuth } from '../lib/firebase-admin.js';
 
 export const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'hr.mojokerto';
 export const CREDENTIAL_SALT = 'ajinomoto-mojokerto-hr-2026';
@@ -200,6 +200,7 @@ export async function resolveAuthenticatedAdmin(token: string): Promise<{
 
   // 2. Otherwise verify Firebase ID Token (3-part JWT) via Firebase Admin SDK
   try {
+    const adminAuth = await getAdminAuth();
     const decodedToken = await adminAuth.verifyIdToken(token);
     const adminUser = await getOrCreateUser(
       decodedToken.uid,

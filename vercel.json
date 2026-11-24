@@ -3,15 +3,15 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/index.ts": {
+    "api/index.mjs": {
       "maxDuration": 30,
-      "includeFiles": "supabase/schema.sql"
+      "includeFiles": "{api/_bundle.mjs,supabase/schema.sql}"
     }
   },
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "/api/index"
+      "destination": "/api/index.mjs"
     },
     {
       "source": "/((?!api/|assets/).*)",
