@@ -1,6 +1,6 @@
 import { desc, eq } from 'drizzle-orm';
-import { db } from './index.ts';
-import { ensureMediaAssetsSeeded } from './media.ts';
+import { db } from './index.js';
+import { ensureMediaAssetsSeeded } from './media.js';
 import {
   absensi,
   aiAuditLogs,
@@ -11,10 +11,10 @@ import {
   pendaftaran,
   systemSettings,
   universitasPks,
-} from './schema.ts';
-import { getOrCreateUser } from './users.ts';
-import type { DatabaseSchema } from '../../server/store.ts';
-import { ADMIN_PASSWORD_HASH, ADMIN_USERNAME } from '../middleware/auth.ts';
+} from './schema.js';
+import { getOrCreateUser } from './users.js';
+import type { DatabaseSchema } from '../../server/store.js';
+import { ADMIN_PASSWORD_HASH, ADMIN_USERNAME } from '../middleware/auth.js';
 
 const SETTINGS_KEY = 'default';
 

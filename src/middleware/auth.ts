@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import type { DecodedIdToken } from 'firebase-admin/auth';
-import { isSessionRevokedInDb, revokeSessionInDb } from '../db/preferences.ts';
-import { getOrCreateUser, getUserWithProfileByUid, type HydratedAdminUser } from '../db/users.ts';
-import { adminAuth } from '../lib/firebase-admin.ts';
+import { isSessionRevokedInDb, revokeSessionInDb } from '../db/preferences.js';
+import { getOrCreateUser, getUserWithProfileByUid, type HydratedAdminUser } from '../db/users.js';
+import { adminAuth } from '../lib/firebase-admin.js';
 
 export const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'hr.mojokerto';
 export const CREDENTIAL_SALT = 'ajinomoto-mojokerto-hr-2026';

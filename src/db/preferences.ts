@@ -1,6 +1,6 @@
 import { eq, lt } from 'drizzle-orm';
-import { db } from './index.ts';
-import { revokedSessions, systemSettings, userProfiles, users } from './schema.ts';
+import { db } from './index.js';
+import { revokedSessions, systemSettings, userProfiles, users } from './schema.js';
 
 const SETTINGS_KEY = 'default';
 

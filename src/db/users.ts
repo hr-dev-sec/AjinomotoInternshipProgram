@@ -1,13 +1,13 @@
 import crypto from 'node:crypto';
 import { desc, eq } from 'drizzle-orm';
-import { db } from './index.ts';
+import { db } from './index.js';
 import {
   mediaAssets,
   mediaEditHistory,
   profileChangeLogs,
   userProfiles,
   users,
-} from './schema.ts';
+} from './schema.js';
 
 export interface HydratedAdminUser {
   id: number;

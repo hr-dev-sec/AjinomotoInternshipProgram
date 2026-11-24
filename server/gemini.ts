@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
-import { dbStore, diffDays, getJakartaDateStr, getJakartaTimestamp } from './store';
-import type { Lowongan, Pendaftaran } from '../src/types/internship';
+import { dbStore, diffDays, getJakartaDateStr, getJakartaTimestamp } from './store.js';
+import type { Lowongan, Pendaftaran } from '../src/types/internship.js';
 
 function getAiClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;

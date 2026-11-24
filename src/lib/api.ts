@@ -43,7 +43,9 @@ export async function apiRequest<T>(url: string, options: RequestInit = {}): Pro
     json = text ? (JSON.parse(text) as Record<string, unknown>) : {};
   } catch {
     parseError = true;
-    json = { error: 'Respons server bukan format JSON yang valid.' };
+    json = {
+      error: `Respons server bukan format JSON yang valid (HTTP ${res.status}). Pastikan backend API & koneksi database Supabase aktif.`,
+    };
   }
 
   if (!res.ok) {

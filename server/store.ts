@@ -10,8 +10,8 @@ import type {
   Pendaftaran,
   RekomendasiTalent,
   UniversitasPKS,
-} from '../src/types/internship';
-import { loadOrSeedPostgresData, syncDatabaseToPostgres } from '../src/db/storeSync.ts';
+} from '../src/types/internship.js';
+import { loadOrSeedPostgresData, syncDatabaseToPostgres } from '../src/db/storeSync.js';
 
 export interface AdminProfile {
   username: string;
@@ -25,7 +25,7 @@ export interface AdminProfile {
 }
 
 export const DEFAULT_ADMIN_PROFILE: AdminProfile = {
-  username: 'hr.mojokerto',
+  username: process.env.ADMIN_USERNAME || 'hr.mojokerto',
   namaTampilan: 'Rina Kusuma',
   role: 'HR Development Admin',
   departemen: 'HR Development Section',

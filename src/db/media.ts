@@ -1,6 +1,6 @@
 import { desc, eq } from 'drizzle-orm';
-import { db } from './index.ts';
-import { mediaAssets, mediaEditHistory } from './schema.ts';
+import { db } from './index.js';
+import { mediaAssets, mediaEditHistory } from './schema.js';
 
 export interface MediaAssetItem {
   assetKey: string;

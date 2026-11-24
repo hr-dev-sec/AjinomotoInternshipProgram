@@ -7,7 +7,7 @@ import {
   broadcastRealtimeEvent,
   getRealtimeClientCount,
   handleRealtimeSse,
-} from './server/realtime.ts';
+} from './server/realtime.js';
 import {
   calcDurationMonths,
   computeTalentRekomendasi,
@@ -16,15 +16,15 @@ import {
   getJakartaDateStr,
   getJakartaTimestamp,
   haversineDistanceMeters,
-} from './server/store.ts';
+} from './server/store.js';
 import {
   analyzeAttendanceAnomalies,
   chatWithHrAssistant,
   draftHrEmail,
   generateExecutiveInsight,
   screenApplicantCv,
-} from './server/gemini.ts';
-import { getDatabaseProviderInfo, getLiveDatabaseTableCounts } from './src/db/index.ts';
+} from './server/gemini.js';
+import { getDatabaseProviderInfo, getLiveDatabaseTableCounts } from './src/db/index.js';
 import {
   DEFAULT_MEDIA_ASSETS,
   OPTIONAL_MEDIA_KEYS,
@@ -32,8 +32,8 @@ import {
   getPublicMediaMap,
   resetMediaAssetToDefault,
   updateMediaAsset,
-} from './src/db/media.ts';
-import { getPreferencesFromDb, savePreferencesToDb } from './src/db/preferences.ts';
+} from './src/db/media.js';
+import { getPreferencesFromDb, savePreferencesToDb } from './src/db/preferences.js';
 import {
   createManagedUser,
   deleteManagedUser,
@@ -44,8 +44,8 @@ import {
   listAllUsers,
   updateManagedUser,
   updateUserProfileAndAudit,
-} from './src/db/users.ts';
-import { adminAuth } from './src/lib/firebase-admin.ts';
+} from './src/db/users.js';
+import { adminAuth } from './src/lib/firebase-admin.js';
 import {
   ADMIN_PASSWORD_HASH,
   ADMIN_USERNAME,
@@ -63,8 +63,8 @@ import {
   revokeSessionToken,
   signSessionToken,
   verifyPassword,
-} from './src/middleware/auth.ts';
-import type { Lowongan, Mahasiswa, Pendaftaran, UniversitasPKS } from './src/types/internship';
+} from './src/middleware/auth.js';
+import type { Lowongan, Mahasiswa, Pendaftaran, UniversitasPKS } from './src/types/internship.js';
 
 function buildSessionCookieHeader(token: string, maxAgeSeconds: number): string {
   return `ajinomoto_session=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=${maxAgeSeconds}`;
