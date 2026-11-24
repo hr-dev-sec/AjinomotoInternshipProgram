@@ -24,7 +24,12 @@ import {
   generateExecutiveInsight,
   screenApplicantCv,
 } from './gemini.js';
-import { getDatabaseProviderInfo, getLiveDatabaseTableCounts } from '../src/db/index.js';
+import {
+  formatPostgresConnectionError,
+  getDatabaseProviderInfo,
+  getLiveDatabaseTableCounts,
+  pool,
+} from '../src/db/index.js';
 import {
   DEFAULT_MEDIA_ASSETS,
   OPTIONAL_MEDIA_KEYS,
@@ -108,9 +113,36 @@ export function createApiApp(): Express {
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '10mb' }));
 
-  // Health endpoint (zero startup probe)
-  app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, timezone: 'Asia/Jakarta', tanggal: getJakartaDateStr() });
+  // Health endpoint (zero startup probe; pass ?db=1 to test live PostgreSQL/Supabase connectivity safely)
+  app.get('/api/health', async (req, res) => {
+    const base = { ok: true, timezone: 'Asia/Jakarta', tanggal: getJakartaDateStr() };
+    if (req.query.db !== '1') {
+      return res.json(base);
+    }
+    const provider = getDatabaseProviderInfo();
+    try {
+      const ping = await pool.query<{ now: string }>('SELECT NOW()::text AS now');
+      const userCountRes = await pool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM users');
+      return res.json({
+        ...base,
+        dbConnected: true,
+        provider: provider.provider,
+        hostLabel: provider.hostLabel,
+        sslEnabled: provider.sslEnabled,
+        serverTime: ping.rows[0]?.now || null,
+        userAccountsCount: Number(userCountRes.rows[0]?.count || 0),
+      });
+    } catch (err) {
+      return res.status(503).json({
+        ...base,
+        ok: false,
+        dbConnected: false,
+        provider: provider.provider,
+        hostLabel: provider.hostLabel,
+        sslEnabled: provider.sslEnabled,
+        error: formatPostgresConnectionError(err),
+      });
+    }
   });
 
   // Real-time Server-Sent Events stream (auto-updates all connected tabs/browsers immediately)
@@ -460,34 +492,26 @@ export function createApiApp(): Express {
       const rawPassword = String(password);
 
       const dbRecord = await getUserWithPasswordByUsername(cleanUsername);
-      const storedProfile = dbStore.getAdminProfile();
-
-      if (dbRecord) {
-        if (!dbRecord.user.isActive) {
-          return res.status(403).json({
-            error: 'Akun ini sedang dinonaktifkan. Silakan hubungi HR Development Admin.',
-          });
-        }
-        if (!verifyPassword(rawPassword, dbRecord.user.passwordHash)) {
-          return res.status(401).json({ error: 'Username atau password tidak sesuai.' });
-        }
-      } else {
-        const fallbackUsername = (storedProfile.username || ADMIN_USERNAME).toLowerCase();
-        const fallbackHash = storedProfile.passwordHash || ADMIN_PASSWORD_HASH;
-        if (cleanUsername !== fallbackUsername || !verifyPassword(rawPassword, fallbackHash)) {
-          return res.status(401).json({ error: 'Username atau password tidak sesuai.' });
-        }
+      if (!dbRecord) {
+        return res.status(401).json({ error: 'Username atau password tidak sesuai.' });
+      }
+      if (!dbRecord.user.isActive) {
+        return res.status(403).json({
+          error: 'Akun ini sedang dinonaktifkan. Silakan hubungi HR Development Admin.',
+        });
+      }
+      if (!verifyPassword(rawPassword, dbRecord.user.passwordHash)) {
+        return res.status(401).json({ error: 'Username atau password tidak sesuai.' });
       }
 
-      const uid = dbRecord?.user.uid || 'local-hr-mojokerto';
       const syncedUser = await getOrCreateUser(
-        uid,
-        dbRecord?.profile?.emailKorporat || dbRecord?.user.email || storedProfile.email,
-        dbRecord?.profile?.namaTampilan || storedProfile.namaTampilan,
-        dbRecord?.profile?.avatarUrl || storedProfile.avatarUrl,
+        dbRecord.user.uid,
+        dbRecord.profile?.emailKorporat || dbRecord.user.email,
+        dbRecord.profile?.namaTampilan || dbRecord.user.username,
+        dbRecord.profile?.avatarUrl,
         'password',
-        dbRecord?.user.username || cleanUsername,
-        dbRecord?.user.passwordHash || storedProfile.passwordHash || ADMIN_PASSWORD_HASH
+        dbRecord.user.username,
+        dbRecord.user.passwordHash || ADMIN_PASSWORD_HASH
       );
 
       const payload: TokenPayload = {

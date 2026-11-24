@@ -6,20 +6,78 @@ declare global {
   var _postgresPool: Pool | undefined;
 }
 
+function normalizeConnectionString(raw: string | undefined): string | null {
+  if (!raw) return null;
+  let cleaned = raw.trim();
+  // Strip accidental `psql '...'` copy-paste prefix
+  if (/^psql\s+/i.test(cleaned)) {
+    cleaned = cleaned.replace(/^psql\s+/i, '').trim();
+  }
+  // Strip accidental surrounding quotes pasted into Vercel Environment Variables
+  cleaned = cleaned.replace(/^['"]+|['"]+$/g, '').trim();
+
+  if (
+    !cleaned ||
+    !(cleaned.startsWith('postgres://') || cleaned.startsWith('postgresql://')) ||
+    cleaned.includes('YOUR_PASSWORD') ||
+    cleaned.includes('[YOUR-PASSWORD]') ||
+    cleaned.includes('CHANGE_ME')
+  ) {
+    return null;
+  }
+
+  // pg v8.13+ overrides `ssl: { rejectUnauthorized: false }` when `sslmode=` is present in URI,
+  // which causes SELF_SIGNED_CERT_IN_CHAIN errors on Supabase Pooler. Strip sslmode cleanly.
+  try {
+    const parsed = new URL(cleaned);
+    parsed.searchParams.delete('sslmode');
+    parsed.searchParams.delete('uselibpqcompat');
+    return parsed.toString();
+  } catch {
+    return cleaned;
+  }
+}
+
 function getExternalConnectionString(): string | null {
   const candidates = [process.env.SUPABASE_DB_URL, process.env.DATABASE_URL];
   for (const raw of candidates) {
-    const trimmed = (raw || '').trim();
-    if (
-      trimmed &&
-      (trimmed.startsWith('postgres://') || trimmed.startsWith('postgresql://')) &&
-      !trimmed.includes('YOUR_PASSWORD') &&
-      !trimmed.includes('CHANGE_ME')
-    ) {
-      return trimmed;
-    }
+    const normalized = normalizeConnectionString(raw);
+    if (normalized) return normalized;
   }
   return null;
+}
+
+export function formatPostgresConnectionError(err: unknown): string {
+  const rawErr = err as { code?: string; message?: string; cause?: { code?: string; message?: string } };
+  const inner = rawErr?.cause || rawErr;
+  const code = String(inner?.code || rawErr?.code || '');
+  const msg = String(inner?.message || rawErr?.message || '');
+  const combined = `${code} ${msg}`.toLowerCase();
+
+  if (combined.includes('econnrefused') || combined.includes('127.0.0.1') || combined.includes('::1')) {
+    return 'Koneksi database ditolak (ECONNREFUSED). Pastikan variabel SUPABASE_DB_URL di Vercel terisi lengkap dengan URI Pooler Supabase (tanpa [YOUR-PASSWORD]) lalu lakukan Redeploy.';
+  }
+  if (combined.includes('enotfound') || combined.includes('eai_again') || combined.includes('enetunreach')) {
+    return 'Host database Supabase tidak dapat dijangkau dari Vercel (IPv6/DNS). Gunakan Connection String dari tab Transaction Pooler (port 6543, host *.pooler.supabase.com), bukan Direct Connection (db.*.supabase.co).';
+  }
+  if (
+    code === '28P01' ||
+    combined.includes('password authentication failed') ||
+    combined.includes('tenant or user not found')
+  ) {
+    return 'Autentikasi Supabase gagal (password atau username Pooler tidak cocok). Periksa ulang password dan format postgres.[PROJECT-REF] pada SUPABASE_DB_URL di Vercel.';
+  }
+  if (code === '42P01' || combined.includes('does not exist')) {
+    return 'Tabel database belum ditemukan di Supabase. Jalankan seluruh skema SQL (supabase/schema.sql) di Supabase -> SQL Editor terlebih dahulu.';
+  }
+  if (combined.includes('timeout') || combined.includes('etimedout')) {
+    return 'Koneksi ke database Supabase timeout. Pastikan project Supabase tidak dalam status Paused dan menggunakan Transaction Pooler port 6543.';
+  }
+  if (combined.includes('self-signed') || combined.includes('certificate')) {
+    return 'Sertifikat SSL database ditolak. Hapus parameter ?sslmode=... dari SUPABASE_DB_URL lalu Redeploy.';
+  }
+
+  return `Gagal terhubung ke database PostgreSQL${code ? ` (${code})` : ''}: ${msg || 'kesalahan tidak diketahui'}`;
 }
 
 export interface DatabaseProviderInfo {

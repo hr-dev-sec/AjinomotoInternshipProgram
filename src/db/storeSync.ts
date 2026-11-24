@@ -1,5 +1,5 @@
 import { desc, eq } from 'drizzle-orm';
-import { db } from './index.js';
+import { db, formatPostgresConnectionError } from './index.js';
 import { ensureMediaAssetsSeeded } from './media.js';
 import {
   absensi,
@@ -11,6 +11,7 @@ import {
   pendaftaran,
   systemSettings,
   universitasPks,
+  users,
 } from './schema.js';
 import { getOrCreateUser } from './users.js';
 import type { DatabaseSchema } from '../../server/store.js';
@@ -20,6 +21,12 @@ const SETTINGS_KEY = 'default';
 
 export async function ensureAdminUserSeeded(data: DatabaseSchema): Promise<void> {
   try {
+    // Only seed the initial bootstrap admin when the users table is completely empty.
+    // Once accounts exist in Supabase `users`, 100% of authentication & user management
+    // comes strictly from the database without env overrides resurrecting deleted accounts.
+    const existing = await db.select({ id: users.id }).from(users).limit(1);
+    if (existing.length > 0) return;
+
     const adminProfile = data.adminProfile;
     await getOrCreateUser(
       'local-hr-mojokerto',
@@ -32,7 +39,7 @@ export async function ensureAdminUserSeeded(data: DatabaseSchema): Promise<void>
     );
   } catch (error) {
     console.error('Database query failed in ensureAdminUserSeeded:', error);
-    throw new Error('Gagal melakukan inisialisasi akun admin pada database.', { cause: error });
+    throw new Error(formatPostgresConnectionError(error), { cause: error });
   }
 }
 
@@ -439,6 +446,6 @@ export async function loadOrSeedPostgresData(fallbackSeed: DatabaseSchema): Prom
     };
   } catch (error) {
     console.error('Database query failed in loadOrSeedPostgresData:', error);
-    throw new Error('Gagal memuat data sistem dari database PostgreSQL.', { cause: error });
+    throw new Error(formatPostgresConnectionError(error), { cause: error });
   }
 }
