@@ -1,11 +1,15 @@
-import { GoogleGenAI, Type } from '@google/genai';
-import { dbStore, diffDays, getJakartaDateStr, getJakartaTimestamp } from './store.js';
+import { GoogleGenAI, ThinkingLevel, Type, type GenerateContentResponse } from '@google/genai';
+import { appendAiAuditLogToDb } from '../src/db/storeSync.js';
 import type { Lowongan, Pendaftaran } from '../src/types/internship.js';
+import { dbStore, diffDays, getJakartaDateStr, getJakartaTimestamp } from './store.js';
+
+const PRIMARY_MODEL = 'gemini-4-hydrogen';
+const FALLBACK_MODEL = 'gemini-3.1-flash-lite';
 
 function getAiClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-    throw new Error('Kunci API layanan AI belum dikonfigurasi pada Secrets environment server.');
+    throw new Error('Kunci API layanan AI (GEMINI_API_KEY) belum dikonfigurasi pada environment server.');
   }
   return new GoogleGenAI({
     apiKey,
@@ -17,20 +21,138 @@ function getAiClient(): GoogleGenAI {
   });
 }
 
-function logAiAudit(fitur: string, adminUser: string, ringkasanPrompt: string, status: 'Sukses' | 'Error') {
-  const data = dbStore.getAll();
-  data.aiAuditLogs.unshift({
-    id: `AI-${Date.now()}`,
+function isTransientAiError(err: unknown): boolean {
+  const raw = err instanceof Error ? err.message : String(err || '');
+  const status = (err as { status?: number; code?: number })?.status ?? (err as { code?: number })?.code;
+  const lower = raw.toLowerCase();
+  return (
+    status === 503 ||
+    status === 504 ||
+    status === 429 ||
+    status === 500 ||
+    lower.includes('503') ||
+    lower.includes('unavailable') ||
+    lower.includes('high demand') ||
+    lower.includes('overloaded') ||
+    lower.includes('timeout') ||
+    lower.includes('timed out') ||
+    lower.includes('deadline')
+  );
+}
+
+export function formatFriendlyAiError(err: unknown, lang: 'id' | 'en' = 'id'): string {
+  const raw = err instanceof Error ? err.message : String(err || '');
+  const lower = raw.toLowerCase();
+
+  if (lower.includes('gemini_api_key') || lower.includes('api_key_invalid') || lower.includes('api key not valid') || lower.includes('403') || lower.includes('permission_denied')) {
+    return lang === 'en'
+      ? 'AI service API key is invalid or not configured. Please verify GEMINI_API_KEY in server environment variables.'
+      : 'API Key Gemini belum valid atau belum dikonfigurasi. Periksa kembali nilai GEMINI_API_KEY pada Environment Variables Vercel lalu lakukan Redeploy.';
+  }
+  if (lower.includes('429') || lower.includes('resource_exhausted') || lower.includes('quota')) {
+    return lang === 'en'
+      ? 'Gemini API quota limit has been reached temporarily. Please try again shortly or check your API key quota.'
+      : 'Kuota permintaan API Gemini sedang mencapai batas sementara. Silakan coba kembali beberapa saat lagi.';
+  }
+  if (isTransientAiError(err)) {
+    return lang === 'en'
+      ? 'The AI service is temporarily experiencing high traffic. Please try sending your question again in a few seconds.'
+      : 'Server AI Gemini sedang mengalami lonjakan trafik sementara. Silakan kirim ulang pertanyaan Anda beberapa detik lagi.';
+  }
+  if (lower.includes('not_found') || lower.includes('404')) {
+    return lang === 'en'
+      ? 'Selected AI model is currently unavailable for this API key.'
+      : 'Model AI yang diminta sedang tidak tersedia untuk API Key ini.';
+  }
+  return lang === 'en'
+    ? 'Unable to complete the AI request at this moment. Please try again.'
+    : 'Gagal memproses permintaan AI saat ini. Silakan coba beberapa saat lagi.';
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`AI request timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function generateWithResilience(
+  ai: GoogleGenAI,
+  params: {
+    contents: Parameters<GoogleGenAI['models']['generateContent']>[0]['contents'];
+    config?: Record<string, unknown>;
+  },
+  lang: 'id' | 'en' = 'id'
+): Promise<GenerateContentResponse> {
+  const baseConfig = params.config || {};
+
+  // Attempt 1: Primary model (gemini-4-hydrogen) with LOW thinking for fast ~1-3s latency
+  try {
+    return await withTimeout(
+      ai.models.generateContent({
+        model: PRIMARY_MODEL,
+        contents: params.contents,
+        config: {
+          ...baseConfig,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        },
+      }),
+      13_000
+    );
+  } catch (primaryErr) {
+    if (!isTransientAiError(primaryErr)) {
+      throw new Error(formatFriendlyAiError(primaryErr, lang), { cause: primaryErr });
+    }
+    console.warn(`Primary Gemini model (${PRIMARY_MODEL}) transient failure; retrying with ${FALLBACK_MODEL}:`, primaryErr);
+  }
+
+  // Brief backoff before falling back to fast gemini-3.1-flash-lite
+  await new Promise((r) => setTimeout(r, 450));
+
+  try {
+    return await withTimeout(
+      ai.models.generateContent({
+        model: FALLBACK_MODEL,
+        contents: params.contents,
+        config: {
+          ...baseConfig,
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
+        },
+      }),
+      12_000
+    );
+  } catch (fallbackErr) {
+    throw new Error(formatFriendlyAiError(fallbackErr, lang), { cause: fallbackErr });
+  }
+}
+
+async function logAiAudit(
+  fitur: string,
+  adminUser: string,
+  ringkasanPrompt: string,
+  status: 'Sukses' | 'Error'
+): Promise<void> {
+  const entry = {
+    id: `AI-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     timestamp: getJakartaTimestamp(),
     fitur,
     adminUser,
     ringkasanPrompt: ringkasanPrompt.slice(0, 180),
     status,
-  });
+  };
+  const data = dbStore.getAll();
+  data.aiAuditLogs.unshift(entry);
   if (data.aiAuditLogs.length > 100) {
     data.aiAuditLogs = data.aiAuditLogs.slice(0, 100);
   }
-  dbStore.save();
+  await appendAiAuditLogToDb(entry);
 }
 
 export interface ExecutiveInsightResult {
@@ -89,39 +211,42 @@ ${JSON.stringify(payload, null, 2)}
 Berikan insight eksekutif yang tajam, faktual, profesional, dalam Bahasa Indonesia yang formal dan ringkas tanpa kata klise.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
-      contents: promptText,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            ringkasanEksekutif: { type: Type.STRING },
-            sorotanKehadiran: { type: Type.STRING },
-            risikoPks: { type: Type.STRING },
-            rekomendasiTalent: { type: Type.STRING },
-            langkahPrioritas: {
-              type: Type.ARRAY,
-              items: { type: Type.STRING },
+    const response = await generateWithResilience(
+      ai,
+      {
+        contents: promptText,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              ringkasanEksekutif: { type: Type.STRING },
+              sorotanKehadiran: { type: Type.STRING },
+              risikoPks: { type: Type.STRING },
+              rekomendasiTalent: { type: Type.STRING },
+              langkahPrioritas: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
             },
+            required: [
+              'ringkasanEksekutif',
+              'sorotanKehadiran',
+              'risikoPks',
+              'rekomendasiTalent',
+              'langkahPrioritas',
+            ],
           },
-          required: [
-            'ringkasanEksekutif',
-            'sorotanKehadiran',
-            'risikoPks',
-            'rekomendasiTalent',
-            'langkahPrioritas',
-          ],
         },
       },
-    });
+      lang
+    );
 
     const parsed = JSON.parse((response.text ?? '{}').trim()) as ExecutiveInsightResult;
-    logAiAudit('AI Executive Insight', adminUser, `Agregat ${stats.kpi.totalAktif} peserta aktif`, 'Sukses');
+    await logAiAudit('AI Executive Insight', adminUser, `Agregat ${stats.kpi.totalAktif} peserta aktif`, 'Sukses');
     return parsed;
   } catch (err) {
-    logAiAudit('AI Executive Insight', adminUser, 'Gagal memanggil layanan AI', 'Error');
+    await logAiAudit('AI Executive Insight', adminUser, 'Gagal memanggil layanan AI', 'Error');
     throw err;
   }
 }
@@ -175,7 +300,7 @@ Anonymized Candidate Profile:
 ${JSON.stringify(anonymizedApplicant, null, 2)}
 
 If a PDF document is attached, review technical competencies, project/organizational experience, and educational background without retaining personal data (name/email/student ID).
-Provide an objective assessment in clear, professional English for kompetensicocok, celahKompetensi, ringkasanAnalisis, and catatanKeputusanManual.
+Provide an objective assessment in clear, professional English for kompetensiCocok, celahKompetensi, ringkasanAnalisis, and catatanKeputusanManual.
 IMPORTANT: For the "kategori" field, strictly use one of these exact enum values: "Sangat Cocok", "Cukup Cocok", or "Perlu Pertimbangan".`
       : `Anda adalah HR Recruitment Specialist PT Ajinomoto Indonesia.
 Evaluasi kesesuaian kompetensi kandidat (dianonimkan) terhadap spesifikasi lowongan magang berikut:
@@ -203,38 +328,41 @@ Jika dokumen PDF terlampir, baca kompetensi teknis, pengalaman proyek/organisasi
   parts.push({ text: textPrompt });
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
-      contents: { parts },
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            skorKecocokan: { type: Type.INTEGER },
-            kategori: { type: Type.STRING },
-            kompetensiCocok: { type: Type.ARRAY, items: { type: Type.STRING } },
-            celahKompetensi: { type: Type.ARRAY, items: { type: Type.STRING } },
-            ringkasanAnalisis: { type: Type.STRING },
-            catatanKeputusanManual: { type: Type.STRING },
+    const response = await generateWithResilience(
+      ai,
+      {
+        contents: { parts },
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              skorKecocokan: { type: Type.INTEGER },
+              kategori: { type: Type.STRING },
+              kompetensiCocok: { type: Type.ARRAY, items: { type: Type.STRING } },
+              celahKompetensi: { type: Type.ARRAY, items: { type: Type.STRING } },
+              ringkasanAnalisis: { type: Type.STRING },
+              catatanKeputusanManual: { type: Type.STRING },
+            },
+            required: [
+              'skorKecocokan',
+              'kategori',
+              'kompetensiCocok',
+              'celahKompetensi',
+              'ringkasanAnalisis',
+              'catatanKeputusanManual',
+            ],
           },
-          required: [
-            'skorKecocokan',
-            'kategori',
-            'kompetensiCocok',
-            'celahKompetensi',
-            'ringkasanAnalisis',
-            'catatanKeputusanManual',
-          ],
         },
       },
-    });
+      lang
+    );
 
     const parsed = JSON.parse((response.text ?? '{}').trim()) as CvScreeningResult;
-    logAiAudit('Screening CV', adminUser, `Screening teranonimkan untuk ${pendaftar.id} (${pendaftar.lowongan})`, 'Sukses');
+    await logAiAudit('Screening CV', adminUser, `Screening teranonimkan untuk ${pendaftar.id} (${pendaftar.lowongan})`, 'Sukses');
     return parsed;
   } catch (err) {
-    logAiAudit('Screening CV', adminUser, `Error screening ${pendaftar.id}`, 'Error');
+    await logAiAudit('Screening CV', adminUser, `Error screening ${pendaftar.id}`, 'Error');
     throw err;
   }
 }
@@ -251,7 +379,7 @@ export async function chatWithHrAssistant(
   const daily = dbStore.getDailyAttendance(today);
   const stats = dbStore.getDashboardStats();
 
-  // Provide anonymized/operational HR snapshot so queries like "siapa yang belum absen hari ini?" or "PKS mana yang habis 60 hari lagi?" are answered accurately
+  // Provide operational HR snapshot so queries like "siapa yang belum absen hari ini?" or "PKS mana yang habis 45 hari lagi?" are answered accurately
   const contextSnapshot = {
     tanggalHariIni: today,
     ringkasanKpi: stats.kpi,
@@ -284,22 +412,26 @@ export async function chatWithHrAssistant(
   const systemInstruction =
     lang === 'en'
       ? `You are the HR Development Assistant for PT Ajinomoto Indonesia – Mojokerto Factory.
-Answer HR Admin questions accurately, concisely, and strictly grounded in the following real-time operational data (respond in clear, professional English):
+Answer HR Admin questions accurately, concisely (under 180 words unless listing records), and strictly grounded in the following real-time operational data (respond in clear, professional English):
 ${JSON.stringify(contextSnapshot)}
 
 Rules:
 - Always base your answer on the JSON data above. Never fabricate numbers or names.
+- Use clean bullet points when listing interns or universities.
 - If asked about final selection decisions (Accept/Reject), remind the admin that the final decision always rests with HR Admin.`
       : `Anda adalah Asisten HR Development PT Ajinomoto Indonesia – Pabrik Mojokerto.
-Jawab pertanyaan HR Admin secara akurat, ringkas, dan berbasis data operasional real-time berikut (gunakan Bahasa Indonesia profesional):
+Jawab pertanyaan HR Admin secara akurat, ringkas (maksimal ~180 kata kecuali saat menampilkan daftar), dan berbasis data operasional real-time berikut (gunakan Bahasa Indonesia profesional):
 ${JSON.stringify(contextSnapshot)}
 
 Aturan:
-- Selalu dasarkan jawaban pada data JSON di atas. Jangan mengarang angka.
+- Selalu dasarkan jawaban pada data JSON di atas. Jangan mengarang angka atau nama.
+- Gunakan poin rapi saat menyebutkan daftar peserta atau universitas.
 - Jika ditanya keputusan seleksi final (Terima/Tolak), ingatkan bahwa keputusan akhir tetap berada di tangan HR Admin.`;
 
+  // Keep last 8 turns to prevent bloated prompts
+  const recentHistory = history.slice(-8);
   const contents = [
-    ...history.map((m) => ({
+    ...recentHistory.map((m) => ({
       role: m.role,
       parts: [{ text: m.text }],
     })),
@@ -307,14 +439,17 @@ Aturan:
   ];
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
-      contents,
-      config: {
-        systemInstruction,
+    const response = await generateWithResilience(
+      ai,
+      {
+        contents,
+        config: {
+          systemInstruction,
+        },
       },
-    });
-    logAiAudit('Asisten HR Chat', adminUser, question, 'Sukses');
+      lang
+    );
+    await logAiAudit('Asisten HR Chat', adminUser, question, 'Sukses');
     return (
       response.text ||
       (lang === 'en'
@@ -322,7 +457,7 @@ Aturan:
         : 'Maaf, tidak ada respons yang dihasilkan.')
     );
   } catch (err) {
-    logAiAudit('Asisten HR Chat', adminUser, `Error: ${question}`, 'Error');
+    await logAiAudit('Asisten HR Chat', adminUser, `Error: ${question}`, 'Error');
     throw err;
   }
 }
@@ -355,26 +490,29 @@ Jenis Surat: ${jenisSurat}
 Konteks: ${JSON.stringify(konteks)}`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            subjek: { type: Type.STRING },
-            isiSurat: { type: Type.STRING },
+    const response = await generateWithResilience(
+      ai,
+      {
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              subjek: { type: Type.STRING },
+              isiSurat: { type: Type.STRING },
+            },
+            required: ['subjek', 'isiSurat'],
           },
-          required: ['subjek', 'isiSurat'],
         },
       },
-    });
+      lang
+    );
     const parsed = JSON.parse((response.text ?? '{}').trim()) as { subjek: string; isiSurat: string };
-    logAiAudit('Drafting Email & Surat', adminUser, `Jenis: ${jenisSurat}`, 'Sukses');
+    await logAiAudit('Drafting Email & Surat', adminUser, `Jenis: ${jenisSurat}`, 'Sukses');
     return parsed;
   } catch (err) {
-    logAiAudit('Drafting Email & Surat', adminUser, `Error jenis: ${jenisSurat}`, 'Error');
+    await logAiAudit('Drafting Email & Surat', adminUser, `Error jenis: ${jenisSurat}`, 'Error');
     throw err;
   }
 }
@@ -390,7 +528,6 @@ export async function analyzeAttendanceAnomalies(
   const daily = dbStore.getDailyAttendance(tanggal);
   const data = dbStore.getAll();
 
-  // Compute deterministic flags across recent logs
   const izinCountByNim = new Map<string, number>();
   for (const log of data.absensi) {
     if (log.status === 'Izin') {
@@ -422,38 +559,41 @@ Untuk "tingkatRisiko", gunakan tepat salah satu nilai: "Tinggi", "Sedang", atau 
 Data: ${JSON.stringify(sanitizedSummary)}`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-4-hydrogen',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            ringkasan: { type: Type.STRING },
-            temuan: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  kodePeserta: { type: Type.STRING },
-                  nama: { type: Type.STRING },
-                  tingkatRisiko: { type: Type.STRING },
-                  alasan: { type: Type.STRING },
+    const response = await generateWithResilience(
+      ai,
+      {
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              ringkasan: { type: Type.STRING },
+              temuan: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    kodePeserta: { type: Type.STRING },
+                    nama: { type: Type.STRING },
+                    tingkatRisiko: { type: Type.STRING },
+                    alasan: { type: Type.STRING },
+                  },
+                  required: ['kodePeserta', 'nama', 'tingkatRisiko', 'alasan'],
                 },
-                required: ['kodePeserta', 'nama', 'tingkatRisiko', 'alasan'],
               },
             },
+            required: ['ringkasan', 'temuan'],
           },
-          required: ['ringkasan', 'temuan'],
         },
       },
-    });
+      lang
+    );
     const parsed = JSON.parse((response.text ?? '{}').trim());
-    logAiAudit('Deteksi Anomali Absensi', adminUser, `Tanggal ${tanggal}`, 'Sukses');
+    await logAiAudit('Deteksi Anomali Absensi', adminUser, `Tanggal ${tanggal}`, 'Sukses');
     return parsed;
   } catch (err) {
-    logAiAudit('Deteksi Anomali Absensi', adminUser, `Error tanggal ${tanggal}`, 'Error');
+    await logAiAudit('Deteksi Anomali Absensi', adminUser, `Error tanggal ${tanggal}`, 'Error');
     throw err;
   }
 }

@@ -132,8 +132,8 @@ export const createPool = () => {
       global._postgresPool = new Pool({
         connectionString: externalUrl,
         ssl: { rejectUnauthorized: false },
-        max: isServerless ? 3 : 10,
-        idleTimeoutMillis: isServerless ? 10000 : 30000,
+        max: isServerless ? 6 : 10,
+        idleTimeoutMillis: isServerless ? 15000 : 30000,
         connectionTimeoutMillis: 15000,
       });
     } else {
@@ -142,8 +142,8 @@ export const createPool = () => {
         user: process.env.SQL_USER,
         password: process.env.SQL_PASSWORD,
         database: process.env.SQL_DB_NAME,
-        max: isServerless ? 3 : 10,
-        idleTimeoutMillis: isServerless ? 10000 : 30000,
+        max: isServerless ? 6 : 10,
+        idleTimeoutMillis: isServerless ? 15000 : 30000,
         connectionTimeoutMillis: 15000,
       });
     }

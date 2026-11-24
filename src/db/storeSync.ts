@@ -18,6 +18,32 @@ import type { DatabaseSchema } from '../../server/store.js';
 import { ADMIN_PASSWORD_HASH, ADMIN_USERNAME } from '../middleware/auth.js';
 
 const SETTINGS_KEY = 'default';
+let bootstrapSeedChecked = false;
+
+export async function appendAiAuditLogToDb(entry: {
+  id: string;
+  timestamp: string;
+  fitur: string;
+  adminUser: string;
+  ringkasanPrompt: string;
+  status: 'Sukses' | 'Error';
+}): Promise<void> {
+  try {
+    await db
+      .insert(aiAuditLogs)
+      .values({
+        id: entry.id,
+        timestamp: entry.timestamp,
+        fitur: entry.fitur,
+        adminUser: entry.adminUser,
+        ringkasanPrompt: entry.ringkasanPrompt,
+        status: entry.status,
+      })
+      .onConflictDoNothing({ target: aiAuditLogs.id });
+  } catch (err) {
+    console.error('Failed to persist AI audit log row:', err);
+  }
+}
 
 export async function ensureAdminUserSeeded(data: DatabaseSchema): Promise<void> {
   try {
@@ -306,8 +332,10 @@ export async function syncDatabaseToPostgres(
 
 export async function loadOrSeedPostgresData(fallbackSeed: DatabaseSchema): Promise<DatabaseSchema> {
   try {
-    await ensureMediaAssetsSeeded();
-    await ensureAdminUserSeeded(fallbackSeed);
+    if (!bootstrapSeedChecked) {
+      await Promise.all([ensureMediaAssetsSeeded(), ensureAdminUserSeeded(fallbackSeed)]);
+      bootstrapSeedChecked = true;
+    }
 
     const [
       existingSettings,

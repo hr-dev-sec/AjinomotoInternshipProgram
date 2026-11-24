@@ -145,14 +145,33 @@ export function createApiApp(): Express {
     }
   });
 
-  // Real-time Server-Sent Events stream (auto-updates all connected tabs/browsers immediately)
+  // Real-time Server-Sent Events stream (disabled on Vercel serverless where long-lived streams time out after 30s)
   app.get('/api/events', (req, res) => {
+    if (process.env.VERCEL) {
+      return res.status(204).end();
+    }
     handleRealtimeSse(req, res);
   });
 
-  // Lazy on-demand PostgreSQL hydration on first API traffic
+  // Routes that query their own PostgreSQL table directly and never need full 11-table hydration
+  const DIRECT_DB_PREFIXES = [
+    '/health',
+    '/events',
+    '/preferences',
+    '/public/media',
+    '/media',
+    '/users',
+    '/auth/session',
+    '/auth/profile',
+    '/auth/logout',
+  ];
+
+  // Lazy on-demand PostgreSQL hydration only for routes backed by dbStore
   app.use('/api', async (req, res, next) => {
-    if (req.path === '/health' || req.path === '/events') return next();
+    const isDirectRoute = DIRECT_DB_PREFIXES.some(
+      (prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`)
+    );
+    if (isDirectRoute) return next();
     try {
       await dbStore.ensurePostgresHydrated();
       return next();
@@ -1591,7 +1610,6 @@ export function createApiApp(): Express {
     try {
       const lang: 'id' | 'en' = req.body?.lang === 'en' ? 'en' : 'id';
       const insight = await generateExecutiveInsight(req.adminUser?.username || 'hr-admin', lang);
-      await dbStore.flushToPostgres().catch(() => {});
       res.json(insight);
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal menghasilkan AI Insight.' });
@@ -1607,7 +1625,6 @@ export function createApiApp(): Express {
       if (!pendaftar) return res.status(404).json({ error: 'Data pelamar tidak ditemukan.' });
       const lowongan = data.lowongan.find((l) => l.namaPosisi === pendaftar.lowongan);
       const result = await screenApplicantCv(pendaftar, lowongan, req.adminUser?.username || 'hr-admin', lang);
-      await dbStore.flushToPostgres().catch(() => {});
       res.json(result);
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal melakukan screening CV dengan AI.' });
@@ -1627,7 +1644,6 @@ export function createApiApp(): Express {
         req.adminUser?.username || 'hr-admin',
         lang
       );
-      await dbStore.flushToPostgres().catch(() => {});
       res.json({ answer });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal memproses pertanyaan Asisten HR.' });
@@ -1644,7 +1660,6 @@ export function createApiApp(): Express {
         req.adminUser?.username || 'hr-admin',
         lang
       );
-      await dbStore.flushToPostgres().catch(() => {});
       res.json(draft);
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal menyusun draf surat.' });
@@ -1656,7 +1671,6 @@ export function createApiApp(): Express {
       const tanggal = String(req.body?.tanggal || getJakartaDateStr());
       const lang: 'id' | 'en' = req.body?.lang === 'en' ? 'en' : 'id';
       const analysis = await analyzeAttendanceAnomalies(tanggal, req.adminUser?.username || 'hr-admin', lang);
-      await dbStore.flushToPostgres().catch(() => {});
       res.json(analysis);
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal menganalisis anomali absensi.' });

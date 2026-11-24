@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { clearApiGetCache } from './api';
 
 export type RealtimeEntity =
   | 'lowongan'
@@ -27,8 +28,11 @@ const listeners = new Set<Listener>();
 let sharedEventSource: EventSource | null = null;
 let reconnectTimer: number | null = null;
 let reconnectAttempt = 0;
+let sseDisabled = false;
+let localMutationBound = false;
 
 function notifyListeners(payload: RealtimeEventPayload): void {
+  clearApiGetCache();
   for (const fn of listeners) {
     try {
       fn(payload);
@@ -38,9 +42,23 @@ function notifyListeners(payload: RealtimeEventPayload): void {
   }
 }
 
+function bindLocalMutationBridge(): void {
+  if (typeof window === 'undefined' || localMutationBound) return;
+  localMutationBound = true;
+  window.addEventListener('ajinomoto:mutated', () => {
+    notifyListeners({
+      id: `local-${Date.now()}`,
+      entity: 'all',
+      action: 'mutated',
+      timestamp: new Date().toISOString(),
+    });
+  });
+}
+
 function connectEventSource(): void {
   if (typeof window === 'undefined' || typeof EventSource === 'undefined') return;
-  if (sharedEventSource || listeners.size === 0) return;
+  bindLocalMutationBridge();
+  if (sseDisabled || sharedEventSource || listeners.size === 0) return;
 
   const es = new EventSource('/api/events', { withCredentials: true });
   sharedEventSource = es;
@@ -66,8 +84,14 @@ function connectEventSource(): void {
       sharedEventSource = null;
     }
     if (listeners.size === 0) return;
-    const delayMs = Math.min(15000, 1000 * Math.pow(2, Math.min(reconnectAttempt, 4)));
+    // On serverless hosts (e.g., Vercel where /api/events returns 204), stop reconnecting cleanly
+    // after 2 failed attempts so browser sockets and serverless slots are never wasted.
     reconnectAttempt += 1;
+    if (reconnectAttempt >= 2) {
+      sseDisabled = true;
+      return;
+    }
+    const delayMs = 3000;
     if (reconnectTimer !== null) {
       window.clearTimeout(reconnectTimer);
     }

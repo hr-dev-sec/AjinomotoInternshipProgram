@@ -743,7 +743,7 @@ class DataStore {
 
   async ensurePostgresHydrated(): Promise<void> {
     const isServerless = Boolean(process.env.VERCEL);
-    const cacheStale = isServerless && Date.now() - this.lastHydratedAt > 3000;
+    const cacheStale = isServerless && Date.now() - this.lastHydratedAt > 45_000;
     if (this.pgHydrated && !cacheStale) return;
     if (!this.hydratePromise) {
       this.hydratePromise = loadOrSeedPostgresData(this.data)

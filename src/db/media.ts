@@ -162,9 +162,12 @@ function detectMimeType(url: string, fallback = 'image/jpeg'): string {
   return fallback;
 }
 
+let mediaAssetsSeeded = false;
+
 export async function ensureMediaAssetsSeeded(): Promise<void> {
+  if (mediaAssetsSeeded) return;
   try {
-    const existing = await db.select().from(mediaAssets);
+    const existing = await db.select({ assetKey: mediaAssets.assetKey }).from(mediaAssets);
     const existingKeys = new Set(existing.map((item) => item.assetKey));
 
     for (const item of DEFAULT_MEDIA_ASSETS) {
@@ -200,6 +203,7 @@ export async function ensureMediaAssetsSeeded(): Promise<void> {
         });
       }
     }
+    mediaAssetsSeeded = true;
   } catch (error) {
     console.error('Database query failed in ensureMediaAssetsSeeded:', error);
     throw new Error('Gagal melakukan inisialisasi tabel aset gambar.', { cause: error });
@@ -209,12 +213,14 @@ export async function ensureMediaAssetsSeeded(): Promise<void> {
 export async function getAllMediaAssets() {
   try {
     await ensureMediaAssetsSeeded();
-    const assets = await db.select().from(mediaAssets);
-    const history = await db
-      .select()
-      .from(mediaEditHistory)
-      .orderBy(desc(mediaEditHistory.createdAt))
-      .limit(40);
+    const [assets, history] = await Promise.all([
+      db.select().from(mediaAssets),
+      db
+        .select()
+        .from(mediaEditHistory)
+        .orderBy(desc(mediaEditHistory.createdAt))
+        .limit(40),
+    ]);
 
     // Keep default ordering consistent for UI presentation
     const orderIndex = new Map(DEFAULT_MEDIA_ASSETS.map((item, idx) => [item.assetKey, idx]));

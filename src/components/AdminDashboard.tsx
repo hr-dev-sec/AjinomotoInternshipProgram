@@ -180,7 +180,7 @@ export const AdminDashboard: React.FC<{
 
   useEffect(() => {
     refreshNavBadges();
-  }, [activeTab]);
+  }, []);
 
   useRealtimeSync(['pendaftaran', 'universitas_pks', 'all'], () => {
     refreshNavBadges();
