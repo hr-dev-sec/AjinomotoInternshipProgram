@@ -38,7 +38,13 @@ import {
   resetMediaAssetToDefault,
   updateMediaAsset,
 } from '../src/db/media.js';
-import { getPreferencesFromDb, savePreferencesToDb } from '../src/db/preferences.js';
+import {
+  getPreferencesFromDb,
+  sanitizeLang,
+  sanitizeThemeId,
+  savePreferencesToDb,
+} from '../src/db/preferences.js';
+import { ensureAdminUserSeeded } from '../src/db/storeSync.js';
 import {
   createManagedUser,
   deleteManagedUser,
@@ -46,7 +52,9 @@ import {
   getRecentUserAuditLogs,
   getUserById,
   getUserWithPasswordByUsername,
+  type HydratedAdminUser,
   listAllUsers,
+  touchUserLastLogin,
   updateManagedUser,
   updateUserProfileAndAudit,
 } from '../src/db/users.js';
@@ -63,6 +71,7 @@ import {
   hashPasswordScrypt,
   invalidateAuthSessionCache,
   isAdminRole,
+  primeAuthSessionCache,
   requireAuth,
   requireUserManagementRole,
   resolveAuthenticatedAdmin,
@@ -162,6 +171,8 @@ export function createApiApp(): Express {
     '/public/media',
     '/media',
     '/users',
+    '/auth/login',
+    '/auth/firebase',
     '/auth/session',
     '/auth/profile',
     '/auth/logout',
@@ -511,7 +522,12 @@ export function createApiApp(): Express {
       const cleanUsername = String(username).trim().toLowerCase();
       const rawPassword = String(password);
 
-      const dbRecord = await getUserWithPasswordByUsername(cleanUsername);
+      let dbRecord = await getUserWithPasswordByUsername(cleanUsername);
+      if (!dbRecord) {
+        // Only seed bootstrap admin on a brand-new empty users table without slowing normal logins
+        await ensureAdminUserSeeded(dbStore.getAll());
+        dbRecord = await getUserWithPasswordByUsername(cleanUsername);
+      }
       if (!dbRecord) {
         return res.status(401).json({ error: 'Username atau password tidak sesuai.' });
       }
@@ -524,25 +540,60 @@ export function createApiApp(): Express {
         return res.status(401).json({ error: 'Username atau password tidak sesuai.' });
       }
 
-      const syncedUser = await getOrCreateUser(
-        dbRecord.user.uid,
-        dbRecord.profile?.emailKorporat || dbRecord.user.email,
-        dbRecord.profile?.namaTampilan || dbRecord.user.username,
-        dbRecord.profile?.avatarUrl,
-        'password',
-        dbRecord.user.username,
-        dbRecord.user.passwordHash || ADMIN_PASSWORD_HASH
-      );
+      const nowIso = new Date().toISOString();
+      let syncedUser: HydratedAdminUser;
+      if (dbRecord.profile) {
+        syncedUser = {
+          id: dbRecord.user.id,
+          uid: dbRecord.user.uid,
+          username: dbRecord.user.username,
+          namaTampilan: dbRecord.profile.namaTampilan,
+          role: dbRecord.profile.role,
+          departemen: dbRecord.profile.departemen,
+          email: dbRecord.profile.emailKorporat,
+          noTelepon: dbRecord.profile.noTelepon,
+          avatarUrl: dbRecord.profile.avatarUrl,
+          authProvider: dbRecord.user.authProvider,
+          isActive: dbRecord.user.isActive,
+          lastLoginAt: nowIso,
+          createdAt: dbRecord.user.createdAt ? dbRecord.user.createdAt.toISOString() : undefined,
+        };
+        // Non-blocking audit timestamp update (does not delay login response)
+        void touchUserLastLogin(dbRecord.user.id);
+      } else {
+        syncedUser = await getOrCreateUser(
+          dbRecord.user.uid,
+          dbRecord.user.email,
+          dbRecord.user.username,
+          undefined,
+          'password',
+          dbRecord.user.username,
+          dbRecord.user.passwordHash || ADMIN_PASSWORD_HASH
+        );
+      }
 
+      const exp = Date.now() + SESSION_TTL_MS;
       const payload: TokenPayload = {
         jti: crypto.randomBytes(16).toString('hex'),
         uid: syncedUser.uid,
         username: syncedUser.username,
         namaTampilan: syncedUser.namaTampilan,
         role: syncedUser.role,
-        exp: Date.now() + SESSION_TTL_MS,
+        exp,
       };
       const token = signSessionToken(payload);
+
+      // Immediately prime server session cache & start background dashboard store hydration
+      primeAuthSessionCache(token, syncedUser, exp);
+      void dbStore.ensurePostgresHydrated().catch(() => {});
+
+      const preferences = dbRecord.profile
+        ? {
+            themeId: sanitizeThemeId(dbRecord.profile.preferredTheme),
+            lang: sanitizeLang(dbRecord.profile.preferredLang),
+            scope: 'user' as const,
+          }
+        : undefined;
 
       res.setHeader(
         'Set-Cookie',
@@ -551,6 +602,7 @@ export function createApiApp(): Express {
       return res.json({
         token,
         user: syncedUser,
+        preferences,
       });
     } catch (err) {
       return res.status(500).json({ error: err instanceof Error ? err.message : 'Gagal memproses login.' });

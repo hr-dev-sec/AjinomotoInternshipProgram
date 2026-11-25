@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Bot, Clock, Lock, ShieldCheck, Users, X } from 'lucide-react';
+import { ArrowLeft, Bot, CheckCircle2, Clock, Loader2, Lock, ShieldCheck, Users, X } from 'lucide-react';
 import { useAppPreferences } from '../contexts/AppPreferencesContext';
-import { apiRequest, setAdminToken, setFirebaseIdToken } from '../lib/api';
+import { apiRequest, prefetchApiGet, primeApiGetCache, setAdminToken, setFirebaseIdToken } from '../lib/api';
 import { localizeApiMessage } from '../lib/localizeData';
 import { ThemeLanguageControls } from './ThemeLanguageControls';
 
@@ -25,6 +25,7 @@ export const AdminLogin: React.FC<{
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loginSuccess, setLoginSuccess] = useState(false);
   const [error, setError] = useState('');
   const [mediaMap, setMediaMap] = useState<Record<string, { currentUrl: string; objectPosition?: string }>>({});
 
@@ -44,23 +45,35 @@ export const AdminLogin: React.FC<{
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading || loginSuccess) return;
     setError('');
     setLoading(true);
     try {
-      const res = await apiRequest<{ token: string; user: AdminUser }>('/api/auth/login', {
+      const res = await apiRequest<{
+        token: string;
+        user: AdminUser;
+        preferences?: { themeId: string; lang: string; scope: 'user' | 'system' };
+      }>('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify({ username: username.trim(), password }),
       });
       setFirebaseIdToken(null);
       setAdminToken(res.token);
-      onSuccess(res.user);
+      if (res.preferences) {
+        primeApiGetCache('/api/preferences', res.preferences);
+      }
+      // Start loading dashboard data immediately while smoothly transitioning UI
+      prefetchApiGet('/api/dashboard/overview');
+      setLoginSuccess(true);
+      window.setTimeout(() => {
+        onSuccess(res.user);
+      }, 180);
     } catch (err) {
       setError(
         err instanceof Error
           ? localizeApiMessage(err.message, lang)
           : t('Login gagal.', 'Login failed.')
       );
-    } finally {
       setLoading(false);
     }
   };
@@ -308,12 +321,26 @@ export const AdminLogin: React.FC<{
 
               <button
                 type="submit"
-                disabled={loading}
-                className="w-full rounded-lg btn-theme-primary px-4 py-2.5 text-sm font-semibold disabled:opacity-50"
+                disabled={loading || loginSuccess}
+                className={`w-full inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-all duration-200 ${
+                  loginSuccess
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'btn-theme-primary disabled:opacity-75'
+                }`}
               >
-                {loading
-                  ? t('Memverifikasi Sesi...', 'Verifying Session...')
-                  : t('Masuk ke Dashboard', 'Sign In to Dashboard')}
+                {loginSuccess ? (
+                  <>
+                    <CheckCircle2 className="h-4 w-4 shrink-0" />
+                    <span>{t('Login Berhasil · Membuka Dashboard...', 'Sign-In Successful · Opening Dashboard...')}</span>
+                  </>
+                ) : loading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                    <span>{t('Memverifikasi Sesi...', 'Verifying Session...')}</span>
+                  </>
+                ) : (
+                  <span>{t('Masuk ke Dashboard', 'Sign In to Dashboard')}</span>
+                )}
               </button>
             </form>
           </div>

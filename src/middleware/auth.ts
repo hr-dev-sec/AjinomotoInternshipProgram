@@ -139,6 +139,18 @@ function setCachedResolvedSession(token: string, value: ResolvedAdminResult, tok
   resolvedSessionCache.set(token, { value, expiresAt });
 }
 
+export function primeAuthSessionCache(token: string, adminUser: HydratedAdminUser, tokenExpMs?: number): void {
+  if (!token) return;
+  setCachedResolvedSession(
+    token,
+    {
+      decodedUser: { uid: adminUser.uid, email: adminUser.email },
+      adminUser,
+    },
+    tokenExpMs
+  );
+}
+
 export async function revokeSessionToken(token: string): Promise<void> {
   if (!token) return;
   invalidateAuthSessionCache(token);

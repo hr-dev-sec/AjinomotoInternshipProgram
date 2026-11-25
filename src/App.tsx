@@ -177,8 +177,20 @@ export default function App() {
   if (route === 'dashboard') {
     if (checkingAuth) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-executive-canvas text-xs text-slate-600 dark:text-slate-300">
-          {t('Memverifikasi sesi HR Admin...', 'Verifying HR Admin session...')}
+        <div className="min-h-screen flex items-center justify-center bg-executive-canvas px-4">
+          <div className="surface-card tab-panel-enter flex flex-col items-center gap-3.5 px-7 py-6 text-center max-w-xs w-full">
+            <div className="rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200/90 shadow-2xs">
+              <img
+                src={DEFAULT_FAVICON_URL}
+                alt="Ajinomoto"
+                className="h-7 w-auto object-contain"
+              />
+            </div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+              <span className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-red-600 animate-spin dark:border-slate-700 dark:border-t-red-400" />
+              <span>{t('Memverifikasi sesi HR Admin...', 'Verifying HR Admin session...')}</span>
+            </div>
+          </div>
         </div>
       );
     }
@@ -193,24 +205,28 @@ export default function App() {
       );
     }
     return (
-      <AdminDashboard
-        user={adminUser}
-        onUserUpdated={(updated) => setAdminUser(updated)}
-        onLoggedOut={handleLoggedOut}
-        onGoPortal={() => navigate('index')}
-      />
-    );
-  }
-
-  if (route === 'login') {
-    if (adminUser) {
-      return (
+      <div className="tab-panel-enter">
         <AdminDashboard
           user={adminUser}
           onUserUpdated={(updated) => setAdminUser(updated)}
           onLoggedOut={handleLoggedOut}
           onGoPortal={() => navigate('index')}
         />
+      </div>
+    );
+  }
+
+  if (route === 'login') {
+    if (adminUser) {
+      return (
+        <div className="tab-panel-enter">
+          <AdminDashboard
+            user={adminUser}
+            onUserUpdated={(updated) => setAdminUser(updated)}
+            onLoggedOut={handleLoggedOut}
+            onGoPortal={() => navigate('index')}
+          />
+        </div>
       );
     }
     return (

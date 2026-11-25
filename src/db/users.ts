@@ -134,25 +134,37 @@ export async function getOrCreateUser(
   }
 }
 
+export async function touchUserLastLogin(userId: number): Promise<void> {
+  try {
+    const now = new Date();
+    await db
+      .update(users)
+      .set({ lastLoginAt: now, updatedAt: now })
+      .where(eq(users.id, userId));
+  } catch (error) {
+    console.error('Failed updating lastLoginAt:', error);
+  }
+}
+
 export async function getUserWithPasswordByUsername(username: string) {
   try {
     const clean = username.trim().toLowerCase();
     const rows = await db
-      .select()
+      .select({
+        user: users,
+        profile: userProfiles,
+      })
       .from(users)
-      .where(eq(users.username, clean));
-    const userRow = rows[0];
-    if (!userRow) return null;
+      .leftJoin(userProfiles, eq(userProfiles.userId, users.id))
+      .where(eq(users.username, clean))
+      .limit(1);
 
-    const profiles = await db
-      .select()
-      .from(userProfiles)
-      .where(eq(userProfiles.userId, userRow.id));
-    const profileRow = profiles[0];
+    const row = rows[0];
+    if (!row) return null;
 
     return {
-      user: userRow,
-      profile: profileRow || null,
+      user: row.user,
+      profile: row.profile || null,
     };
   } catch (error) {
     console.error('Database query failed in getUserWithPasswordByUsername:', error);
@@ -162,16 +174,20 @@ export async function getUserWithPasswordByUsername(username: string) {
 
 export async function getUserWithProfileByUid(uid: string): Promise<HydratedAdminUser | null> {
   try {
-    const rows = await db.select().from(users).where(eq(users.uid, uid));
-    const userRow = rows[0];
-    if (!userRow) return null;
+    const rows = await db
+      .select({
+        user: users,
+        profile: userProfiles,
+      })
+      .from(users)
+      .leftJoin(userProfiles, eq(userProfiles.userId, users.id))
+      .where(eq(users.uid, uid))
+      .limit(1);
 
-    const profiles = await db
-      .select()
-      .from(userProfiles)
-      .where(eq(userProfiles.userId, userRow.id));
-    const profileRow = profiles[0];
+    const row = rows[0];
+    if (!row) return null;
 
+    const { user: userRow, profile: profileRow } = row;
     return {
       id: userRow.id,
       uid: userRow.uid,
