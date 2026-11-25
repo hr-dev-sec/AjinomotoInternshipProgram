@@ -1,5 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Award, CheckCircle2, ClipboardList, Edit2, Eye, FileClock, FileSpreadsheet, LogIn, Plus, Search, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Award,
+  CheckCircle2,
+  ClipboardList,
+  Download,
+  Edit2,
+  Eye,
+  FileClock,
+  FileSpreadsheet,
+  FileText,
+  LogIn,
+  Plus,
+  Search,
+  X,
+} from 'lucide-react';
 import { useAppPreferences } from '../../contexts/AppPreferencesContext';
 import { apiRequest, getCachedApiResponse } from '../../lib/api';
 import { exportInternCertificatePdf, exportToExcel } from '../../lib/exports';
@@ -19,6 +34,7 @@ import type {
   ProgramType,
 } from '../../types/internship';
 import { CompetencyRadarChart } from '../Charts';
+import { StudentReportModal } from './StudentReportModal';
 
 const PAGE_SIZE = 6;
 
@@ -39,6 +55,9 @@ export const TabInterns: React.FC = () => {
   const [detailData, setDetailData] = useState<InternDetailResponse | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
+  const [reportTarget, setReportTarget] = useState<Mahasiswa | null>(null);
+  const [reportDetail, setReportDetail] = useState<InternDetailResponse | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
 
   // Inline evaluation state
   const [evalBk, setEvalBk] = useState(8);
@@ -222,6 +241,26 @@ export const TabInterns: React.FC = () => {
       );
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const openReportPreview = async (m: Mahasiswa, existingDetail?: InternDetailResponse | null) => {
+    setReportTarget(m);
+    if (existingDetail && existingDetail.mahasiswa.nim === m.nim) {
+      setReportDetail(existingDetail);
+      setReportLoading(false);
+      return;
+    }
+    setReportDetail(null);
+    setReportLoading(true);
+    try {
+      const res = await apiRequest<InternDetailResponse>(`/api/mahasiswa/${encodeURIComponent(m.nim)}/detail`);
+      setReportDetail(res);
+      setReportTarget(res.mahasiswa);
+    } catch {
+      // Keep base intern profile if detail fetch fails
+    } finally {
+      setReportLoading(false);
     }
   };
 
@@ -438,15 +477,24 @@ export const TabInterns: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => openDetailModal(m)}
-                          className="rounded-md border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                          className="rounded-md border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 whitespace-nowrap"
                         >
                           <Eye className="inline h-3 w-3 mr-1" />
                           {t('Detail & Nilai', 'Detail & Score')}
                         </button>
                         <button
                           type="button"
+                          onClick={() => openReportPreview(m)}
+                          className="rounded-md border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-theme-accent hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800 whitespace-nowrap"
+                          title={t('Pratinjau & Unduh Laporan Resmi Mahasiswa', 'Preview & Download Official Student Report')}
+                        >
+                          <FileText className="inline h-3 w-3 mr-1" />
+                          {t('Laporan', 'Report')}
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => openEditModal(m)}
-                          className="rounded-md border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                          className="rounded-md border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 whitespace-nowrap"
                         >
                           <Edit2 className="inline h-3 w-3 mr-1" />
                           Edit
@@ -730,26 +778,50 @@ export const TabInterns: React.FC = () => {
               </div>
             )}
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => setDetailTarget(null)}
-                className="rounded-lg border border-slate-300 px-4 py-2 text-xs font-medium dark:border-slate-700"
+                className="rounded-lg border border-slate-300 px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               >
                 {t('Tutup', 'Close')}
               </button>
               <button
                 type="button"
-                onClick={() => exportInternCertificatePdf(detailTarget)}
+                onClick={() => {
+                  const target = detailTarget;
+                  const currentDetail = detailData;
+                  setDetailTarget(null);
+                  void openReportPreview(target, currentDetail);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+              >
+                <FileText className="h-3.5 w-3.5 text-theme-accent" />
+                {t('Pratinjau Laporan Resmi', 'Preview Official Report')}
+              </button>
+              <button
+                type="button"
+                onClick={() => void exportInternCertificatePdf(detailTarget, { detail: detailData, lang })}
                 className="inline-flex items-center gap-1.5 rounded-lg btn-theme-primary px-4 py-2 text-xs font-semibold"
               >
-                <Award className="h-3.5 w-3.5" />
-                {t('Cetak Laporan & Sertifikat QR PDF', 'Print Report & QR Certificate PDF')}
+                <Download className="h-3.5 w-3.5" />
+                {t('Unduh Laporan PDF (A4)', 'Download Report PDF (A4)')}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      <StudentReportModal
+        open={Boolean(reportTarget)}
+        mahasiswa={reportTarget}
+        detail={reportDetail}
+        loadingDetail={reportLoading}
+        onClose={() => {
+          setReportTarget(null);
+          setReportDetail(null);
+        }}
+      />
 
       {/* Add / Edit Intern Modal */}
       {formModalOpen && (
