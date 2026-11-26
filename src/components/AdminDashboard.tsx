@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BarChart3,
   Bot,
@@ -9,7 +9,9 @@ import {
   GraduationCap,
   Image as ImageIcon,
   LogOut,
+  Maximize2,
   Menu,
+  Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
@@ -66,6 +68,95 @@ export const AdminDashboard: React.FC<{
   const [cmdOpen, setCmdOpen] = useState(false);
   const [cmdQuery, setCmdQuery] = useState('');
   const [navBadges, setNavBadges] = useState<{ applicants?: number; pks?: number }>({});
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const prevSidebarCollapsedRef = useRef<boolean | null>(null);
+
+  const getNativeFullscreenElement = () => {
+    const doc = document as Document & { webkitFullscreenElement?: Element | null };
+    return doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+  };
+
+  const restoreSidebarAfterFullscreen = useCallback(() => {
+    if (prevSidebarCollapsedRef.current !== null) {
+      setSidebarCollapsed(prevSidebarCollapsedRef.current);
+      prevSidebarCollapsedRef.current = null;
+    }
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null;
+      webkitExitFullscreen?: () => Promise<void> | void;
+    };
+    const rootEl = document.documentElement as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void> | void;
+    };
+    const nativeActive = Boolean(doc.fullscreenElement ?? doc.webkitFullscreenElement);
+
+    if (isFullscreen || nativeActive) {
+      setIsFullscreen(false);
+      restoreSidebarAfterFullscreen();
+      if (nativeActive) {
+        try {
+          if (doc.exitFullscreen) {
+            await doc.exitFullscreen();
+          } else if (doc.webkitExitFullscreen) {
+            await doc.webkitExitFullscreen();
+          }
+        } catch {
+          // ignore browser exit errors
+        }
+      }
+      return;
+    }
+
+    prevSidebarCollapsedRef.current = sidebarCollapsed;
+    setSidebarCollapsed(true);
+    setIsFullscreen(true);
+
+    try {
+      if (rootEl.requestFullscreen) {
+        await rootEl.requestFullscreen();
+      } else if (rootEl.webkitRequestFullscreen) {
+        await rootEl.webkitRequestFullscreen();
+      }
+    } catch {
+      // Graceful fallback: keep expanded full-width workspace mode if iframe/browser blocks native fullscreen
+    }
+  }, [isFullscreen, sidebarCollapsed, restoreSidebarAfterFullscreen]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const nativeActive = Boolean(getNativeFullscreenElement());
+      if (nativeActive) {
+        setIsFullscreen(true);
+      } else {
+        setIsFullscreen(false);
+        restoreSidebarAfterFullscreen();
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      const doc = document as Document & {
+        webkitFullscreenElement?: Element | null;
+        webkitExitFullscreen?: () => Promise<void> | void;
+      };
+      if (doc.fullscreenElement || doc.webkitFullscreenElement) {
+        try {
+          if (doc.exitFullscreen) {
+            void doc.exitFullscreen();
+          } else if (doc.webkitExitFullscreen) {
+            void doc.webkitExitFullscreen();
+          }
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+    };
+  }, [restoreSidebarAfterFullscreen]);
 
   const canManageUsers = useMemo(() => {
     const r = (user.role || '').trim().toLowerCase();
@@ -536,7 +627,7 @@ export const AdminDashboard: React.FC<{
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               type="button"
               onClick={() => setCmdOpen(true)}
@@ -557,7 +648,50 @@ export const AdminDashboard: React.FC<{
               <span className="hidden sm:inline">{t('Asisten HR', 'HR Assistant')}</span>
             </button>
 
+            <span
+              className="hidden md:block h-5 w-px bg-slate-200/90 dark:bg-slate-700/80 mx-0.5 shrink-0"
+              aria-hidden="true"
+            />
+
             <ThemeLanguageControls variant="compact" align="right" />
+
+            <button
+              type="button"
+              onClick={() => void toggleFullscreen()}
+              aria-pressed={isFullscreen}
+              aria-label={
+                isFullscreen
+                  ? t('Keluar dari Mode Layar Penuh', 'Exit Full Screen Mode')
+                  : t('Masuk Mode Layar Penuh', 'Enter Full Screen Mode')
+              }
+              title={
+                isFullscreen
+                  ? t('Keluar dari Mode Layar Penuh (ESC)', 'Exit Full Screen Mode (ESC)')
+                  : t('Mode Layar Penuh (Berlaku untuk Semua Tab)', 'Full Screen Mode (Works Across All Tabs)')
+              }
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold shadow-2xs transition-all whitespace-nowrap shrink-0 ${
+                isFullscreen
+                  ? 'border-theme-accent bg-theme-soft text-theme-accent ring-1 ring-[var(--theme-accent-soft-border)] hover:opacity-90'
+                  : 'border-slate-200/90 bg-white/95 text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700/90 dark:bg-slate-900/95 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800'
+              }`}
+            >
+              {isFullscreen ? (
+                <>
+                  <Minimize2 className="h-3.5 w-3.5 shrink-0" />
+                  <span className="hidden sm:inline">{t('Keluar Layar Penuh', 'Exit Full Screen')}</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="h-3.5 w-3.5 text-theme-accent shrink-0" />
+                  <span className="hidden xl:inline">{t('Layar Penuh', 'Full Screen')}</span>
+                </>
+              )}
+            </button>
+
+            <span
+              className="hidden md:block h-5 w-px bg-slate-200/90 dark:bg-slate-700/80 mx-0.5 shrink-0"
+              aria-hidden="true"
+            />
 
             <button
               type="button"
@@ -580,7 +714,11 @@ export const AdminDashboard: React.FC<{
         </header>
 
         {/* Tab Body */}
-        <main className="flex-1 min-w-0 p-3 sm:p-6 max-w-[1520px] 2xl:max-w-[1720px] w-full mx-auto">
+        <main
+          className={`flex-1 min-w-0 p-3 sm:p-6 w-full mx-auto transition-[max-width] duration-200 ${
+            isFullscreen ? 'max-w-none' : 'max-w-[1520px] 2xl:max-w-[1720px]'
+          }`}
+        >
           <div key={activeTab} className="tab-panel-enter">
             {activeTab === 'overview' && (
               <TabOverview
