@@ -11,6 +11,9 @@ export type ThemeId =
 
 export type Language = 'id' | 'en';
 
+export const SESSION_TIMEOUT_OPTIONS = [5, 10, 15, 30, 60] as const;
+export type SessionTimeoutMinutes = (typeof SESSION_TIMEOUT_OPTIONS)[number];
+
 export interface ThemeDefinition {
   id: ThemeId;
   nameId: string;
@@ -103,9 +106,12 @@ interface AppPreferencesContextValue {
   themeId: ThemeId;
   theme: ThemeDefinition;
   setThemeId: (id: ThemeId) => void;
+  setColorMode: (mode: 'light' | 'dark') => void;
   lang: Language;
   setLang: (lang: Language) => void;
   toggleLang: () => void;
+  sessionTimeoutMinutes: SessionTimeoutMinutes;
+  setSessionTimeoutMinutes: (minutes: SessionTimeoutMinutes) => void;
   t: (idText: string, enText: string) => string;
 }
 
@@ -115,25 +121,53 @@ function isValidThemeId(value: unknown): value is ThemeId {
   return typeof value === 'string' && THEMES.some((item) => item.id === value);
 }
 
+function isValidSessionTimeout(value: unknown): value is SessionTimeoutMinutes {
+  return (
+    typeof value === 'number' &&
+    (SESSION_TIMEOUT_OPTIONS as readonly number[]).includes(value)
+  );
+}
+
 export const AppPreferencesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Zero browser localStorage: hydrated & persisted 100% via PostgreSQL /api/preferences
   const [themeId, setThemeIdState] = useState<ThemeId>('ajinomoto-crimson');
   const [lang, setLangState] = useState<Language>('id');
+  const [sessionTimeoutMinutes, setSessionTimeoutMinutesState] = useState<SessionTimeoutMinutes>(15);
+  const lastLightThemeRef = useRef<ThemeId>('ajinomoto-crimson');
+  const lastDarkThemeRef = useRef<ThemeId>('obsidian-dark');
   const latestLocalSaveRef = useRef<number>(0);
+
+  const rememberThemeByMode = useCallback((id: ThemeId) => {
+    const def = THEMES.find((item) => item.id === id);
+    if (!def) return;
+    if (def.isDark) {
+      lastDarkThemeRef.current = id;
+    } else {
+      lastLightThemeRef.current = id;
+    }
+  }, []);
 
   const loadFromServer = useCallback(async () => {
     try {
-      const res = await apiRequest<{ themeId?: string; lang?: string }>('/api/preferences');
+      const res = await apiRequest<{
+        themeId?: string;
+        lang?: string;
+        sessionTimeoutMinutes?: number;
+      }>('/api/preferences');
       if (isValidThemeId(res?.themeId)) {
         setThemeIdState(res.themeId);
+        rememberThemeByMode(res.themeId);
       }
       if (res?.lang === 'id' || res?.lang === 'en') {
         setLangState(res.lang);
       }
+      if (isValidSessionTimeout(res?.sessionTimeoutMinutes)) {
+        setSessionTimeoutMinutesState(res.sessionTimeoutMinutes);
+      }
     } catch {
       // keep active in-memory defaults if offline
     }
-  }, []);
+  }, [rememberThemeByMode]);
 
   useEffect(() => {
     void loadFromServer();
@@ -152,7 +186,11 @@ export const AppPreferencesProvider: React.FC<{ children: React.ReactNode }> = (
     const meta = ev.meta;
     if (meta && isValidThemeId(meta.themeId) && (meta.lang === 'id' || meta.lang === 'en')) {
       setThemeIdState(meta.themeId);
+      rememberThemeByMode(meta.themeId);
       setLangState(meta.lang);
+      if (isValidSessionTimeout(meta.sessionTimeoutMinutes)) {
+        setSessionTimeoutMinutesState(meta.sessionTimeoutMinutes);
+      }
       return;
     }
     void loadFromServer();
@@ -177,22 +215,41 @@ export const AppPreferencesProvider: React.FC<{ children: React.ReactNode }> = (
     document.documentElement.lang = lang;
   }, [lang]);
 
-  const persistPreferences = useCallback((next: { themeId?: ThemeId; lang?: Language }) => {
-    latestLocalSaveRef.current = Date.now();
-    void apiRequest('/api/preferences', {
-      method: 'PUT',
-      body: JSON.stringify(next),
-    }).catch(() => {
-      // ignore transient network failures
-    });
-  }, []);
+  const persistPreferences = useCallback(
+    (next: {
+      themeId?: ThemeId;
+      lang?: Language;
+      sessionTimeoutMinutes?: SessionTimeoutMinutes;
+    }) => {
+      latestLocalSaveRef.current = Date.now();
+      void apiRequest('/api/preferences', {
+        method: 'PUT',
+        body: JSON.stringify(next),
+      }).catch(() => {
+        // ignore transient network failures
+      });
+    },
+    []
+  );
 
   const setThemeId = useCallback(
     (id: ThemeId) => {
       setThemeIdState(id);
+      rememberThemeByMode(id);
       persistPreferences({ themeId: id });
     },
-    [persistPreferences]
+    [persistPreferences, rememberThemeByMode]
+  );
+
+  const setColorMode = useCallback(
+    (mode: 'light' | 'dark') => {
+      const currentlyDark = (THEMES.find((item) => item.id === themeId) || THEMES[0]).isDark;
+      if (mode === 'light' && !currentlyDark) return;
+      if (mode === 'dark' && currentlyDark) return;
+      const targetId = mode === 'dark' ? lastDarkThemeRef.current : lastLightThemeRef.current;
+      setThemeId(targetId);
+    },
+    [themeId, setThemeId]
   );
 
   const setLang = useCallback(
@@ -211,6 +268,14 @@ export const AppPreferencesProvider: React.FC<{ children: React.ReactNode }> = (
     });
   }, [persistPreferences]);
 
+  const setSessionTimeoutMinutes = useCallback(
+    (minutes: SessionTimeoutMinutes) => {
+      setSessionTimeoutMinutesState(minutes);
+      persistPreferences({ sessionTimeoutMinutes: minutes });
+    },
+    [persistPreferences]
+  );
+
   const t = useCallback(
     (idText: string, enText: string) => (lang === 'en' ? enText : idText),
     [lang]
@@ -221,12 +286,26 @@ export const AppPreferencesProvider: React.FC<{ children: React.ReactNode }> = (
       themeId,
       theme,
       setThemeId,
+      setColorMode,
       lang,
       setLang,
       toggleLang,
+      sessionTimeoutMinutes,
+      setSessionTimeoutMinutes,
       t,
     }),
-    [themeId, theme, setThemeId, lang, setLang, toggleLang, t]
+    [
+      themeId,
+      theme,
+      setThemeId,
+      setColorMode,
+      lang,
+      setLang,
+      toggleLang,
+      sessionTimeoutMinutes,
+      setSessionTimeoutMinutes,
+      t,
+    ]
   );
 
   return (

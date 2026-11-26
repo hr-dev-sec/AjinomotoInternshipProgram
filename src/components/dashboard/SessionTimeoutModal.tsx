@@ -3,7 +3,6 @@ import { AlertTriangle, Clock, LogOut, RefreshCw, ShieldAlert } from 'lucide-rea
 import { useAppPreferences } from '../../contexts/AppPreferencesContext';
 import { apiRequest } from '../../lib/api';
 
-const IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes total idle before auto-logout
 const WARNING_LEAD_MS = 60 * 1000; // Show confirmation popup 60 seconds before expiry
 const ACTIVITY_THROTTLE_MS = 1_000;
 
@@ -16,12 +15,16 @@ export const SessionTimeoutModal: React.FC<SessionTimeoutModalProps> = ({
   onTimeoutLogout,
   onManualLogout,
 }) => {
-  const { t } = useAppPreferences();
+  const { sessionTimeoutMinutes, t } = useAppPreferences();
+  const idleTimeoutMs = sessionTimeoutMinutes * 60 * 1000;
+  const idleTimeoutMsRef = useRef<number>(idleTimeoutMs);
+  idleTimeoutMsRef.current = idleTimeoutMs;
+
   const [warningOpen, setWarningOpen] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState(Math.ceil(WARNING_LEAD_MS / 1000));
   const [extending, setExtending] = useState(false);
 
-  const deadlineRef = useRef<number>(Date.now() + IDLE_TIMEOUT_MS);
+  const deadlineRef = useRef<number>(Date.now() + idleTimeoutMs);
   const warningOpenRef = useRef<boolean>(false);
   const lastActivityRef = useRef<number>(Date.now());
   const timedOutRef = useRef<boolean>(false);
@@ -35,10 +38,19 @@ export const SessionTimeoutModal: React.FC<SessionTimeoutModalProps> = ({
   }, [onTimeoutLogout]);
 
   const resetIdleDeadline = useCallback(() => {
-    deadlineRef.current = Date.now() + IDLE_TIMEOUT_MS;
-    lastActivityRef.current = Date.now();
+    const now = Date.now();
+    deadlineRef.current = now + idleTimeoutMsRef.current;
+    lastActivityRef.current = now;
     timedOutRef.current = false;
   }, []);
+
+  // Immediately apply updated timeout duration whenever the user selects 5m / 10m / 15m / 30m / 60m
+  useEffect(() => {
+    warningOpenRef.current = false;
+    setWarningOpen(false);
+    setSecondsLeft(Math.ceil(WARNING_LEAD_MS / 1000));
+    resetIdleDeadline();
+  }, [sessionTimeoutMinutes, resetIdleDeadline]);
 
   const handleContinueSession = async () => {
     setExtending(true);
@@ -71,7 +83,7 @@ export const SessionTimeoutModal: React.FC<SessionTimeoutModalProps> = ({
       const now = Date.now();
       if (now - lastActivityRef.current < ACTIVITY_THROTTLE_MS) return;
       lastActivityRef.current = now;
-      deadlineRef.current = now + IDLE_TIMEOUT_MS;
+      deadlineRef.current = now + idleTimeoutMsRef.current;
     };
 
     const evaluateClock = () => {
@@ -169,8 +181,8 @@ export const SessionTimeoutModal: React.FC<SessionTimeoutModalProps> = ({
             className="text-xs leading-relaxed text-slate-600 dark:text-slate-300"
           >
             {t(
-              'Tidak ada aktivitas yang terdeteksi dalam 14 menit terakhir. Demi menjaga keamanan data HRD PT Ajinomoto Indonesia, sistem akan otomatis mengeluarkan akun Anda dan kembali ke halaman login jika tidak ada konfirmasi.',
-              'No activity has been detected for the past 14 minutes. To protect PT Ajinomoto Indonesia HRD data, you will be automatically signed out and returned to the login page unless you confirm.'
+              `Tidak ada aktivitas yang terdeteksi dalam ${Math.max(1, sessionTimeoutMinutes - 1)} menit terakhir (batas sesi ${sessionTimeoutMinutes} menit). Demi menjaga keamanan data HRD PT Ajinomoto Indonesia, sistem akan otomatis mengeluarkan akun Anda dan kembali ke halaman login jika tidak ada konfirmasi.`,
+              `No activity has been detected for the past ${Math.max(1, sessionTimeoutMinutes - 1)} minutes (${sessionTimeoutMinutes}-minute session limit). To protect PT Ajinomoto Indonesia HRD data, you will be automatically signed out and returned to the login page unless you confirm.`
             )}
           </p>
 

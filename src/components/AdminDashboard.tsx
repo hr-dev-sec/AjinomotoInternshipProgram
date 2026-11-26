@@ -653,7 +653,7 @@ export const AdminDashboard: React.FC<{
               aria-hidden="true"
             />
 
-            <ThemeLanguageControls variant="compact" align="right" />
+            <ThemeLanguageControls variant="compact" align="right" showSessionTimeout />
 
             <button
               type="button"

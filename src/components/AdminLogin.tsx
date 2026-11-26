@@ -52,7 +52,12 @@ export const AdminLogin: React.FC<{
       const res = await apiRequest<{
         token: string;
         user: AdminUser;
-        preferences?: { themeId: string; lang: string; scope: 'user' | 'system' };
+        preferences?: {
+          themeId: string;
+          lang: string;
+          sessionTimeoutMinutes?: number;
+          scope: 'user' | 'system';
+        };
       }>('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify({ username: username.trim(), password }),

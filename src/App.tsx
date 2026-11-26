@@ -39,7 +39,7 @@ function applyFavicon(href: string) {
 }
 
 export default function App() {
-  const { t } = useAppPreferences();
+  const { sessionTimeoutMinutes, t } = useAppPreferences();
   const [route, setRoute] = useState<AppRoute>(() => parseHashRoute());
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -164,8 +164,8 @@ export default function App() {
   const loginNoticeText =
     loginNoticeType === 'timeout'
       ? t(
-          'Sesi Anda berakhir otomatis karena tidak ada aktivitas selama 15 menit tanpa konfirmasi. Silakan login kembali untuk melanjutkan.',
-          'Your session ended automatically due to 15 minutes of inactivity without confirmation. Please sign in again to continue.'
+          `Sesi Anda berakhir otomatis karena tidak ada aktivitas selama ${sessionTimeoutMinutes} menit tanpa konfirmasi. Silakan login kembali untuk melanjutkan.`,
+          `Your session ended automatically due to ${sessionTimeoutMinutes} minutes of inactivity without confirmation. Please sign in again to continue.`
         )
       : loginNoticeType === 'expired'
         ? t(

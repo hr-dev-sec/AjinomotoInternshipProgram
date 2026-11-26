@@ -39,6 +39,7 @@ import {
   updateMediaAsset,
 } from '../src/db/media.js';
 import {
+  getCachedSessionTimeoutMinutes,
   getPreferencesFromDb,
   sanitizeLang,
   sanitizeThemeId,
@@ -81,8 +82,9 @@ import {
 } from '../src/middleware/auth.js';
 import type { Lowongan, Mahasiswa, Pendaftaran, UniversitasPKS } from '../src/types/internship.js';
 
-function buildSessionCookieHeader(token: string, maxAgeSeconds: number): string {
-  return `ajinomoto_session=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned; Max-Age=${maxAgeSeconds}`;
+function buildSessionCookieHeader(token: string): string {
+  // Browser session cookie (no Max-Age): automatically expires when the browser session closes
+  return `ajinomoto_session=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=None; Partitioned`;
 }
 
 function buildClearSessionCookieHeader(): string {
@@ -197,7 +199,12 @@ export function createApiApp(): Express {
         return res.json({ media: fallbackMap });
       }
       if (req.path === '/preferences') {
-        return res.json({ themeId: 'ajinomoto-crimson', lang: 'id', scope: 'system' });
+        return res.json({
+          themeId: 'ajinomoto-crimson',
+          lang: 'id',
+          sessionTimeoutMinutes: getCachedSessionTimeoutMinutes(),
+          scope: 'system',
+        });
       }
       return res.status(503).json({
         error: err instanceof Error ? err.message : 'Layanan database sedang tidak tersedia.',
@@ -219,13 +226,18 @@ export function createApiApp(): Express {
       return res.json(prefs);
     } catch (err) {
       console.error('Failed loading preferences from PostgreSQL:', err);
-      return res.json({ themeId: 'ajinomoto-crimson', lang: 'id', scope: 'system' });
+      return res.json({
+        themeId: 'ajinomoto-crimson',
+        lang: 'id',
+        sessionTimeoutMinutes: getCachedSessionTimeoutMinutes(),
+        scope: 'system',
+      });
     }
   });
 
   app.put('/api/preferences', rateLimit(60, 60_000), async (req, res) => {
     try {
-      const { themeId, lang } = req.body || {};
+      const { themeId, lang, sessionTimeoutMinutes } = req.body || {};
       const token = getTokenFromRequest(req);
       let userUid: string | null = null;
       let updatedBy = 'portal';
@@ -236,15 +248,19 @@ export function createApiApp(): Express {
           updatedBy = resolved.adminUser.username;
         }
       }
+      // Only authenticated admins can change the session timeout duration
+      const allowedTimeout = userUid ? sessionTimeoutMinutes : undefined;
       const saved = await savePreferencesToDb({
         themeId,
         lang,
+        sessionTimeoutMinutes: allowedTimeout,
         userUid,
         updatedBy,
       });
       broadcastRealtimeEvent('preferences', 'updated', {
         themeId: saved.themeId,
         lang: saved.lang,
+        sessionTimeoutMinutes: saved.sessionTimeoutMinutes,
         scope: saved.scope,
       });
       return res.json(saved);
@@ -591,14 +607,12 @@ export function createApiApp(): Express {
         ? {
             themeId: sanitizeThemeId(dbRecord.profile.preferredTheme),
             lang: sanitizeLang(dbRecord.profile.preferredLang),
+            sessionTimeoutMinutes: getCachedSessionTimeoutMinutes(),
             scope: 'user' as const,
           }
         : undefined;
 
-      res.setHeader(
-        'Set-Cookie',
-        buildSessionCookieHeader(token, Math.floor(SESSION_TTL_MS / 1000))
-      );
+      res.setHeader('Set-Cookie', buildSessionCookieHeader(token));
       return res.json({
         token,
         user: syncedUser,
@@ -634,10 +648,7 @@ export function createApiApp(): Express {
         exp: Date.now() + SESSION_TTL_MS,
       };
       const sessionToken = signSessionToken(sessionPayload);
-      res.setHeader(
-        'Set-Cookie',
-        buildSessionCookieHeader(sessionToken, Math.floor(SESSION_TTL_MS / 1000))
-      );
+      res.setHeader('Set-Cookie', buildSessionCookieHeader(sessionToken));
       return res.json({ token: sessionToken, user });
     } catch (err) {
       console.error('Firebase token verification error:', err);
