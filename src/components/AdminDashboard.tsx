@@ -8,6 +8,7 @@ import {
   FileText,
   GraduationCap,
   Image as ImageIcon,
+  Keyboard,
   LogOut,
   Maximize2,
   Menu,
@@ -15,6 +16,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Settings,
+  Share2,
   ShieldCheck,
   UserCog,
   Users,
@@ -29,6 +31,13 @@ import { useRealtimeSync } from '../lib/realtime';
 import type { DashboardStatsResponse } from '../types/internship';
 import type { AdminUser } from './AdminLogin';
 import { ThemeLanguageControls } from './ThemeLanguageControls';
+import {
+  DatabaseStatusBadge,
+  LiveClockPill,
+  NotificationsBell,
+  SharePortalModal,
+  ShortcutsModal,
+} from './dashboard/DashboardHeaderTools';
 import { EditProfileModal } from './dashboard/EditProfileModal';
 import { HrAssistantDrawer } from './dashboard/HrAssistantDrawer';
 import { SessionTimeoutModal } from './dashboard/SessionTimeoutModal';
@@ -67,6 +76,8 @@ export const AdminDashboard: React.FC<{
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [cmdQuery, setCmdQuery] = useState('');
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [navBadges, setNavBadges] = useState<{ applicants?: number; pks?: number }>({});
   const [isFullscreen, setIsFullscreen] = useState(false);
   const prevSidebarCollapsedRef = useRef<boolean | null>(null);
@@ -313,17 +324,62 @@ export const AdminDashboard: React.FC<{
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isTyping =
+        Boolean(target) &&
+        (target?.tagName === 'INPUT' ||
+          target?.tagName === 'TEXTAREA' ||
+          target?.tagName === 'SELECT' ||
+          target?.isContentEditable);
+
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setCmdOpen((prev) => !prev);
+        return;
       }
+
       if (e.key === 'Escape') {
         setCmdOpen(false);
+        setShareOpen(false);
+        setShortcutsOpen(false);
+        return;
+      }
+
+      if (isTyping) return;
+
+      if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setShortcutsOpen((prev) => !prev);
+        return;
+      }
+
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        const lower = e.key.toLowerCase();
+        if (lower === 'f') {
+          e.preventDefault();
+          void toggleFullscreen();
+          return;
+        }
+        if (lower === 'a') {
+          e.preventDefault();
+          setAssistantOpen((prev) => !prev);
+          return;
+        }
+        if (lower === 's') {
+          e.preventDefault();
+          setShareOpen((prev) => !prev);
+          return;
+        }
+        const digit = Number(e.key);
+        if (digit >= 1 && digit <= 9 && tabs[digit - 1]) {
+          e.preventDefault();
+          setActiveTab(tabs[digit - 1].id);
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [tabs, toggleFullscreen]);
 
   const handleLogout = async (reason: 'manual' | 'timeout' = 'manual') => {
     try {
@@ -604,55 +660,92 @@ export const AdminDashboard: React.FC<{
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Header */}
-        <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-200/80 bg-theme-header px-4 py-3 backdrop-blur-md dark:border-slate-800/90 sm:px-6">
-          <div className="flex items-center gap-3 min-w-0">
+        <header className="sticky top-0 z-30 flex items-center justify-between gap-2 sm:gap-3 border-b border-slate-200/80 bg-theme-header px-3 py-2.5 sm:px-5 backdrop-blur-md dark:border-slate-800/90">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              className="lg:hidden rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="lg:hidden inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 shrink-0"
               aria-label={t('Buka menu navigasi', 'Open navigation menu')}
             >
-              <Menu className="h-5 w-5" />
+              <Menu className="h-4.5 w-4.5" />
             </button>
-            <div className="hidden sm:flex h-9 w-9 items-center justify-center rounded-xl icon-theme-plinth shrink-0">
-              <ActiveIcon className="h-4.5 w-4.5" />
+            <div className="hidden sm:flex h-8 w-8 items-center justify-center rounded-lg icon-theme-plinth shrink-0">
+              <ActiveIcon className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <div className="text-[11px] font-medium text-slate-500 dark:text-slate-200 truncate">
-                PT Ajinomoto Indonesia - PT Ajinex International, Mojokerto Factory · {activeMeta.label}
+              <div className="text-[10.5px] font-medium text-slate-500 dark:text-slate-300 truncate leading-tight">
+                <span className="hidden 2xl:inline">
+                  PT Ajinomoto Indonesia - PT Ajinex International, Mojokerto Factory ·{' '}
+                </span>
+                <span className="2xl:hidden">Mojokerto Factory · </span>
+                {activeMeta.label}
               </div>
-              <h1 className="font-display text-base sm:text-lg font-extrabold tracking-tight text-slate-900 dark:text-white truncate">
+              <h1 className="font-display text-sm sm:text-base font-extrabold tracking-tight text-slate-900 dark:text-white truncate leading-snug">
                 {activeMeta.label}
               </h1>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Group 1: Live WIB Clock & Database Activation Status */}
+            <LiveClockPill />
+            <DatabaseStatusBadge onOpenSettings={() => setActiveTab('settings')} />
+
+            <span
+              className="hidden sm:block h-4.5 w-px bg-slate-200/90 dark:bg-slate-700/80 mx-0.5 shrink-0"
+              aria-hidden="true"
+            />
+
+            {/* Group 2: Share, Shortcuts, Notifications, Quick Jump & AI Assistant */}
+            <button
+              type="button"
+              onClick={() => setShareOpen(true)}
+              aria-label={t('Berbagi Tautan & Kode QR', 'Share Link & QR Code')}
+              title={t('Akses & Berbagi ke Perangkat Lain (Alt+S)', 'Access & Share to Another Device (Alt+S)')}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/90 bg-white/95 text-slate-600 shadow-2xs hover:border-slate-300 hover:bg-slate-50 hover:text-theme-accent dark:border-slate-700/90 dark:bg-slate-900/95 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800 transition-all shrink-0"
+            >
+              <Share2 className="h-3.5 w-3.5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShortcutsOpen(true)}
+              aria-label={t('Pintasan Keyboard', 'Keyboard Shortcuts')}
+              title={t('Pintasan Keyboard Dashboard (Shift+?)', 'Dashboard Keyboard Shortcuts (Shift+?)')}
+              className="hidden sm:inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/90 bg-white/95 text-slate-600 shadow-2xs hover:border-slate-300 hover:bg-slate-50 hover:text-theme-accent dark:border-slate-700/90 dark:bg-slate-900/95 dark:text-slate-200 dark:hover:border-slate-600 dark:hover:bg-slate-800 transition-all shrink-0"
+            >
+              <Keyboard className="h-3.5 w-3.5" />
+            </button>
+
+            <NotificationsBell onNavigateTab={setActiveTab} />
+
             <button
               type="button"
               onClick={() => setCmdOpen(true)}
-              className="hidden xl:inline-flex items-center gap-2 rounded-lg border border-slate-200/90 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-2xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800 whitespace-nowrap"
-              title="Command Palette (Ctrl+K)"
+              className="hidden 2xl:inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200/90 bg-white/95 px-2.5 text-[11px] font-semibold text-slate-600 shadow-2xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800 whitespace-nowrap shrink-0"
+              title={t('Navigasi Cepat (Ctrl+K)', 'Quick Jump (Ctrl+K)')}
             >
               <Command className="h-3.5 w-3.5" />
-              <span>{t('Navigasi Cepat', 'Quick Jump')}</span>
               <span className="font-mono text-[10px] text-slate-500 dark:text-slate-300">⌘K</span>
             </button>
 
             <button
               type="button"
               onClick={() => setAssistantOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg btn-theme-primary px-3 py-1.5 text-xs font-semibold whitespace-nowrap"
+              title={t('Buka Asisten HR AI (Alt+A)', 'Open HR AI Assistant (Alt+A)')}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg btn-theme-primary px-2.5 text-[11px] font-semibold whitespace-nowrap shrink-0"
             >
-              <Bot className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">{t('Asisten HR', 'HR Assistant')}</span>
+              <Bot className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden xl:inline">{t('Asisten HR', 'HR Assistant')}</span>
             </button>
 
             <span
-              className="hidden md:block h-5 w-px bg-slate-200/90 dark:bg-slate-700/80 mx-0.5 shrink-0"
+              className="hidden sm:block h-4.5 w-px bg-slate-200/90 dark:bg-slate-700/80 mx-0.5 shrink-0"
               aria-hidden="true"
             />
 
+            {/* Group 3: Language, Theme & Timeout, Full Screen, Profile */}
             <ThemeLanguageControls variant="compact" align="right" showSessionTimeout />
 
             <button
@@ -666,10 +759,10 @@ export const AdminDashboard: React.FC<{
               }
               title={
                 isFullscreen
-                  ? t('Keluar dari Mode Layar Penuh (ESC)', 'Exit Full Screen Mode (ESC)')
-                  : t('Mode Layar Penuh (Berlaku untuk Semua Tab)', 'Full Screen Mode (Works Across All Tabs)')
+                  ? t('Keluar dari Mode Layar Penuh (ESC / Alt+F)', 'Exit Full Screen Mode (ESC / Alt+F)')
+                  : t('Mode Layar Penuh Semua Tab (Alt+F)', 'Full Screen Mode All Tabs (Alt+F)')
               }
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold shadow-2xs transition-all whitespace-nowrap shrink-0 ${
+              className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2 sm:px-2.5 text-[11px] font-semibold shadow-2xs transition-all whitespace-nowrap shrink-0 ${
                 isFullscreen
                   ? 'border-theme-accent bg-theme-soft text-theme-accent ring-1 ring-[var(--theme-accent-soft-border)] hover:opacity-90'
                   : 'border-slate-200/90 bg-white/95 text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700/90 dark:bg-slate-900/95 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800'
@@ -678,26 +771,21 @@ export const AdminDashboard: React.FC<{
               {isFullscreen ? (
                 <>
                   <Minimize2 className="h-3.5 w-3.5 shrink-0" />
-                  <span className="hidden sm:inline">{t('Keluar Layar Penuh', 'Exit Full Screen')}</span>
+                  <span className="hidden sm:inline">{t('Keluar', 'Exit')}</span>
                 </>
               ) : (
                 <>
                   <Maximize2 className="h-3.5 w-3.5 text-theme-accent shrink-0" />
-                  <span className="hidden xl:inline">{t('Layar Penuh', 'Full Screen')}</span>
+                  <span className="hidden 2xl:inline">{t('Layar Penuh', 'Full Screen')}</span>
                 </>
               )}
             </button>
 
-            <span
-              className="hidden md:block h-5 w-px bg-slate-200/90 dark:bg-slate-700/80 mx-0.5 shrink-0"
-              aria-hidden="true"
-            />
-
             <button
               type="button"
               onClick={() => setProfileModalOpen(true)}
-              title={t('Edit Profil HR Admin', 'Edit HR Admin Profile')}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200/90 bg-white px-2 py-1 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800 whitespace-nowrap shrink-0"
+              title={`${user.namaTampilan} · ${t('Edit Profil HR Admin', 'Edit HR Admin Profile')}`}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200/90 bg-white/95 px-1.5 text-[11px] font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-100 dark:hover:bg-slate-800 whitespace-nowrap shrink-0"
             >
               <img
                 src={user.avatarUrl || '/assets/images/avatar_hr_admin_1794535891951.jpg'}
@@ -706,9 +794,9 @@ export const AdminDashboard: React.FC<{
                 onError={(e) => {
                   e.currentTarget.src = '/assets/images/avatar_hr_admin_1794535891951.jpg';
                 }}
-                className="h-6 w-6 rounded-full object-cover shrink-0"
+                className="h-5.5 w-5.5 rounded-full object-cover shrink-0"
               />
-              <span className="hidden md:inline max-w-[116px] truncate">{user.namaTampilan}</span>
+              <span className="hidden 2xl:inline max-w-[96px] truncate pr-1">{user.namaTampilan}</span>
             </button>
           </div>
         </header>
@@ -750,6 +838,19 @@ export const AdminDashboard: React.FC<{
       <SessionTimeoutModal
         onTimeoutLogout={() => handleLogout('timeout')}
         onManualLogout={() => handleLogout('manual')}
+      />
+
+      <SharePortalModal open={shareOpen} onClose={() => setShareOpen(false)} />
+
+      <ShortcutsModal
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+        onOpenCommandPalette={() => setCmdOpen(true)}
+        onToggleFullscreen={() => void toggleFullscreen()}
+        onOpenAssistant={() => setAssistantOpen(true)}
+        onOpenShare={() => setShareOpen(true)}
+        tabs={tabs}
+        onNavigateTab={setActiveTab}
       />
 
       {/* Command Palette (Ctrl/Cmd + K) */}

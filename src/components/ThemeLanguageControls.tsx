@@ -56,7 +56,9 @@ export const ThemeLanguageControls: React.FC<{
       <div
         role="group"
         aria-label={t('Pilih Bahasa', 'Select Language')}
-        className="inline-flex items-center rounded-lg border border-slate-200/90 bg-white/95 p-0.5 shadow-2xs dark:border-slate-700/90 dark:bg-slate-900/95 shrink-0"
+        className={`inline-flex items-center rounded-lg border border-slate-200/90 bg-white/95 p-0.5 shadow-2xs dark:border-slate-700/90 dark:bg-slate-900/95 shrink-0 ${
+          variant === 'compact' ? 'h-8' : ''
+        }`}
       >
         <button
           type="button"
@@ -94,7 +96,7 @@ export const ThemeLanguageControls: React.FC<{
         aria-label={t('Pilih Tema Tampilan', 'Select UI Theme')}
         title={t('Ubah Tema Tampilan & Sesi', 'Switch UI Theme & Session')}
         className={`inline-flex items-center gap-1.5 rounded-lg border border-slate-200/90 bg-white/95 text-xs font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 dark:border-slate-700/90 dark:bg-slate-900/95 dark:text-slate-200 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 ${
-          variant === 'compact' ? 'px-2 py-1.5' : 'px-2.5 py-1.5'
+          variant === 'compact' ? 'h-8 px-2' : 'px-2.5 py-1.5'
         }`}
       >
         <span
