@@ -15,6 +15,7 @@ import {
   Minimize2,
   PanelLeftClose,
   PanelLeftOpen,
+  Presentation,
   Settings,
   Share2,
   ShieldCheck,
@@ -43,6 +44,7 @@ import { HrAssistantDrawer } from './dashboard/HrAssistantDrawer';
 import { SessionTimeoutModal } from './dashboard/SessionTimeoutModal';
 import { TabApplicants } from './dashboard/TabApplicants';
 import { TabAttendance } from './dashboard/TabAttendance';
+import { TabBoardReport } from './dashboard/TabBoardReport';
 import { TabInterns } from './dashboard/TabInterns';
 import { TabMedia } from './dashboard/TabMedia';
 import { TabOverview } from './dashboard/TabOverview';
@@ -53,6 +55,7 @@ import { TabVacancies } from './dashboard/TabVacancies';
 
 export type DashboardTab =
   | 'overview'
+  | 'board'
   | 'attendance'
   | 'interns'
   | 'vacancies'
@@ -199,6 +202,15 @@ export const AdminDashboard: React.FC<{
           label: t('Dashboard', 'Dashboard'),
           desc: t('KPI, AI Insight & Evaluasi Talent', 'KPIs, AI Insight & Talent Evaluation'),
           icon: BarChart3,
+        },
+        {
+          id: 'board',
+          label: t('Laporan Direksi', 'Board Briefing'),
+          desc: t(
+            'Ringkasan Eksekutif & Board Presentation Mode',
+            'Executive Summary & Board Presentation Mode'
+          ),
+          icon: Presentation,
         },
         {
           id: 'attendance',
@@ -368,6 +380,11 @@ export const AdminDashboard: React.FC<{
         if (lower === 's') {
           e.preventDefault();
           setShareOpen((prev) => !prev);
+          return;
+        }
+        if (lower === 'b') {
+          e.preventDefault();
+          setActiveTab('board');
           return;
         }
         const digit = Number(e.key);
@@ -814,6 +831,7 @@ export const AdminDashboard: React.FC<{
                 onNavigateTab={(tab) => setActiveTab(tab)}
               />
             )}
+            {activeTab === 'board' && <TabBoardReport />}
             {activeTab === 'attendance' && <TabAttendance />}
             {activeTab === 'interns' && <TabInterns />}
             {activeTab === 'vacancies' && <TabVacancies />}
